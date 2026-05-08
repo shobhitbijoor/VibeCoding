@@ -36,49 +36,35 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-interface DatabaseStats {
-  Customer?: number
-  CustomerLocation?: number
-  Assembly?: number
-  Part?: number
-  Warranty?: number
-  ServiceRecord?: number
-  Failure?: number
-  RootCause?: number
-  Plant?: number
-  Station?: number
-  Warehouse?: number
-  Supplier?: number
-  SupplierPO?: number
-  QualityInspection?: number
-  Deviation?: number
-  current_version?: number
-  available_versions?: number
-}
-
-interface Version {
-  version: number
-  created_at: string
+interface GraphSnapshot {
+  id: string
+  timestamp: string
   description: string
 }
 
+interface GraphStats {
+  totalNodes: number
+  totalRelationships: number
+  totalSnapshots: number
+  [key: string]: number
+}
+
 export default function DataManagementPage() {
-  const [stats, setStats] = useState<DatabaseStats | null>(null)
-  const [versions, setVersions] = useState<Version[]>([])
-  const [currentVersion, setCurrentVersion] = useState<number>(1)
+  const [stats, setStats] = useState<GraphStats | null>(null)
+  const [snapshots, setSnapshots] = useState<GraphSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState(0)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false)
-  const [selectedVersion, setSelectedVersion] = useState<number | null>(null)
+  const [selectedSnapshot, setSelectedSnapshot] = useState<string | null>(null)
   const [rollingBack, setRollingBack] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchStats = async () => {
     try {
-      const response = await fetch("/api/stats")
+      const response = await fetch("/api/graph?action=statistics")
       if (response.ok) {
         const data = await response.json()
         setStats(data)
@@ -88,23 +74,22 @@ export default function DataManagementPage() {
     }
   }
 
-  const fetchVersions = async () => {
+  const fetchSnapshots = async () => {
     try {
-      const response = await fetch("/api/versions")
+      const response = await fetch("/api/graph?action=snapshots")
       if (response.ok) {
         const data = await response.json()
-        setVersions(data.versions || [])
-        setCurrentVersion(data.current_version || 1)
+        setSnapshots(data || [])
       }
     } catch (error) {
-      console.error("Failed to fetch versions:", error)
+      console.error("Failed to fetch snapshots:", error)
     }
   }
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
-      await Promise.all([fetchStats(), fetchVersions()])
+      await Promise.all([fetchStats(), fetchSnapshots()])
       setLoading(false)
     }
     loadData()
@@ -114,15 +99,15 @@ export default function DataManagementPage() {
     setExporting(true)
     setMessage(null)
     try {
-      const response = await fetch("/api/export")
+      const response = await fetch("/api/graph?action=export")
       if (response.ok) {
-        const blob = await response.blob()
+        const data = await response.json()
+        // Download as JSON file
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
         const url = window.URL.createObjectURL(blob)
         const a = document.createElement("a")
         a.href = url
-        const contentDisposition = response.headers.get("Content-Disposition")
-        const filename = contentDisposition?.match(/filename=(.+)/)?.[1] || "kuzu_export.xlsx"
-        a.download = filename
+        a.download = `kuzu_graph_export_${new Date().toISOString().split('T')[0]}.json`
         document.body.appendChild(a)
         a.click()
         window.URL.revokeObjectURL(url)
@@ -132,6 +117,7 @@ export default function DataManagementPage() {
         setMessage({ type: "error", text: "Failed to export data. Please try again." })
       }
     } catch (error) {
+      console.error("Export error:", error)
       setMessage({ type: "error", text: "Export failed. Please check your connection." })
     } finally {
       setExporting(false)
@@ -146,18 +132,19 @@ export default function DataManagementPage() {
     setImportProgress(0)
     setMessage(null)
 
-    const formData = new FormData()
-    formData.append("file", file)
-
     // Simulate progress
     const progressInterval = setInterval(() => {
       setImportProgress((prev) => Math.min(prev + 10, 90))
     }, 200)
 
     try {
-      const response = await fetch("/api/import", {
+      const text = await file.text()
+      const data = JSON.parse(text)
+
+      const response = await fetch("/api/graph?action=import", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
       })
 
       clearInterval(progressInterval)
@@ -168,17 +155,19 @@ export default function DataManagementPage() {
         if (result.success) {
           setMessage({ 
             type: "success", 
-            text: `Data imported successfully! New version: ${result.new_version}` 
+            text: "Data imported successfully! A backup snapshot was created before import." 
           })
-          await Promise.all([fetchStats(), fetchVersions()])
+          await Promise.all([fetchStats(), fetchSnapshots()])
         } else {
-          setMessage({ type: "error", text: result.message || "Import failed." })
+          setMessage({ type: "error", text: result.error || "Import failed." })
         }
       } else {
         setMessage({ type: "error", text: "Failed to import data. Please check the file format." })
       }
     } catch (error) {
-      setMessage({ type: "error", text: "Import failed. Please check your connection." })
+      clearInterval(progressInterval)
+      console.error("Import error:", error)
+      setMessage({ type: "error", text: "Import failed. Please ensure the file is valid JSON." })
     } finally {
       setImporting(false)
       setImportProgress(0)
@@ -189,33 +178,56 @@ export default function DataManagementPage() {
   }
 
   const handleRollback = async () => {
-    if (selectedVersion === null) return
+    if (!selectedSnapshot) return
 
     setRollingBack(true)
     setMessage(null)
 
     try {
-      const response = await fetch(`/api/versions/rollback/${selectedVersion}`, {
+      const response = await fetch("/api/graph?action=restore", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshotId: selectedSnapshot }),
       })
 
       if (response.ok) {
         const result = await response.json()
         if (result.success) {
-          setMessage({ type: "success", text: `Successfully rolled back to version ${selectedVersion}` })
-          await Promise.all([fetchStats(), fetchVersions()])
+          setMessage({ type: "success", text: "Successfully restored from snapshot!" })
+          await Promise.all([fetchStats(), fetchSnapshots()])
         } else {
-          setMessage({ type: "error", text: result.message || "Rollback failed." })
+          setMessage({ type: "error", text: result.error || "Rollback failed." })
         }
       } else {
         setMessage({ type: "error", text: "Failed to rollback. Please try again." })
       }
     } catch (error) {
+      console.error("Rollback error:", error)
       setMessage({ type: "error", text: "Rollback failed. Please check your connection." })
     } finally {
       setRollingBack(false)
       setRollbackDialogOpen(false)
-      setSelectedVersion(null)
+      setSelectedSnapshot(null)
+    }
+  }
+
+  const handleCreateSnapshot = async () => {
+    try {
+      const response = await fetch("/api/graph?action=snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: "Manual snapshot" }),
+      })
+
+      if (response.ok) {
+        setMessage({ type: "success", text: "Snapshot created successfully!" })
+        await fetchSnapshots()
+      } else {
+        setMessage({ type: "error", text: "Failed to create snapshot." })
+      }
+    } catch (error) {
+      console.error("Snapshot error:", error)
+      setMessage({ type: "error", text: "Failed to create snapshot." })
     }
   }
 
@@ -227,22 +239,22 @@ export default function DataManagementPage() {
     }
   }
 
-  const statCategories = [
-    { label: "Customers", key: "Customer", color: "bg-blue-500/20 text-blue-400" },
-    { label: "Locations", key: "CustomerLocation", color: "bg-blue-500/20 text-blue-400" },
-    { label: "Assemblies", key: "Assembly", color: "bg-emerald-500/20 text-emerald-400" },
-    { label: "Parts", key: "Part", color: "bg-emerald-500/20 text-emerald-400" },
-    { label: "Warranties", key: "Warranty", color: "bg-purple-500/20 text-purple-400" },
-    { label: "Service Records", key: "ServiceRecord", color: "bg-purple-500/20 text-purple-400" },
-    { label: "Failures", key: "Failure", color: "bg-red-500/20 text-red-400" },
-    { label: "Root Causes", key: "RootCause", color: "bg-red-500/20 text-red-400" },
-    { label: "Plants", key: "Plant", color: "bg-amber-500/20 text-amber-400" },
-    { label: "Stations", key: "Station", color: "bg-amber-500/20 text-amber-400" },
-    { label: "Warehouses", key: "Warehouse", color: "bg-amber-500/20 text-amber-400" },
-    { label: "Suppliers", key: "Supplier", color: "bg-cyan-500/20 text-cyan-400" },
-    { label: "Supplier POs", key: "SupplierPO", color: "bg-cyan-500/20 text-cyan-400" },
-    { label: "Quality Inspections", key: "QualityInspection", color: "bg-green-500/20 text-green-400" },
-    { label: "Deviations", key: "Deviation", color: "bg-orange-500/20 text-orange-400" },
+  const nodeCategories = [
+    { label: "Customers", key: "nodes_Customer", color: "bg-blue-500/20 text-blue-400" },
+    { label: "Locations", key: "nodes_CustomerLocation", color: "bg-blue-500/20 text-blue-400" },
+    { label: "Assemblies", key: "nodes_Assembly", color: "bg-emerald-500/20 text-emerald-400" },
+    { label: "Parts", key: "nodes_Part", color: "bg-emerald-500/20 text-emerald-400" },
+    { label: "Warranties", key: "nodes_Warranty", color: "bg-purple-500/20 text-purple-400" },
+    { label: "Service Records", key: "nodes_ServiceRecord", color: "bg-purple-500/20 text-purple-400" },
+    { label: "Failures", key: "nodes_Failure", color: "bg-red-500/20 text-red-400" },
+    { label: "Root Causes", key: "nodes_RootCause", color: "bg-red-500/20 text-red-400" },
+    { label: "Plants", key: "nodes_Plant", color: "bg-amber-500/20 text-amber-400" },
+    { label: "Stations", key: "nodes_Station", color: "bg-amber-500/20 text-amber-400" },
+    { label: "Warehouses", key: "nodes_Warehouse", color: "bg-amber-500/20 text-amber-400" },
+    { label: "Suppliers", key: "nodes_Supplier", color: "bg-cyan-500/20 text-cyan-400" },
+    { label: "Supplier POs", key: "nodes_SupplierPO", color: "bg-cyan-500/20 text-cyan-400" },
+    { label: "Quality Inspections", key: "nodes_QualityInspection", color: "bg-green-500/20 text-green-400" },
+    { label: "Deviations", key: "nodes_Deviation", color: "bg-orange-500/20 text-orange-400" },
   ]
 
   return (
@@ -256,7 +268,7 @@ export default function DataManagementPage() {
         </div>
         <Button variant="outline" size="sm" onClick={() => {
           setLoading(true)
-          Promise.all([fetchStats(), fetchVersions()]).then(() => setLoading(false))
+          Promise.all([fetchStats(), fetchSnapshots()]).then(() => setLoading(false))
         }}>
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           Refresh
@@ -285,12 +297,12 @@ export default function DataManagementPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Current Version</span>
-              <Badge variant="secondary" className="text-lg">v{currentVersion}</Badge>
+              <span className="text-muted-foreground">Total Nodes</span>
+              <Badge variant="secondary" className="text-lg">{stats?.totalNodes || 0}</Badge>
             </div>
             <div className="mt-2 flex items-center justify-between">
-              <span className="text-muted-foreground">Available Snapshots</span>
-              <Badge variant="outline">{versions.length}</Badge>
+              <span className="text-muted-foreground">Total Relationships</span>
+              <Badge variant="outline">{stats?.totalRelationships || 0}</Badge>
             </div>
           </CardContent>
         </Card>
@@ -299,7 +311,7 @@ export default function DataManagementPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <FileSpreadsheet className="h-5 w-5 text-emerald-500" />
-              Total Records
+              Snapshots
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -307,13 +319,10 @@ export default function DataManagementPage() {
               {loading ? (
                 <Loader2 className="h-8 w-8 animate-spin" />
               ) : (
-                stats ? Object.entries(stats)
-                  .filter(([key]) => !["current_version", "available_versions"].includes(key))
-                  .reduce((sum, [, value]) => sum + (typeof value === "number" ? value : 0), 0)
-                : 0
+                stats?.totalSnapshots || 0
               )}
             </div>
-            <p className="text-sm text-muted-foreground">across all node tables</p>
+            <p className="text-sm text-muted-foreground">available for rollback</p>
           </CardContent>
         </Card>
 
@@ -350,9 +359,9 @@ export default function DataManagementPage() {
         <TabsContent value="export" className="mt-4">
           <Card className="border-sidebar-border bg-card">
             <CardHeader>
-              <CardTitle>Export Database to Excel</CardTitle>
+              <CardTitle>Export Database to JSON</CardTitle>
               <CardDescription>
-                Download all graph database data as an Excel file. This file can also be used as a template for importing data.
+                Download all graph database data as a JSON file. This file can also be used as a template for importing data.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -382,7 +391,7 @@ export default function DataManagementPage() {
                 ) : (
                   <>
                     <Download className="mr-2 h-4 w-4" />
-                    Export to Excel
+                    Export to JSON
                   </>
                 )}
               </Button>
@@ -393,9 +402,9 @@ export default function DataManagementPage() {
         <TabsContent value="import" className="mt-4">
           <Card className="border-sidebar-border bg-card">
             <CardHeader>
-              <CardTitle>Import Data from Excel</CardTitle>
+              <CardTitle>Import Data from JSON</CardTitle>
               <CardDescription>
-                Upload an Excel file to replace the current database. Use the exported file as a template for the correct format.
+                Upload a JSON file to replace the current database. Use the exported file as a template for the correct format.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -403,8 +412,8 @@ export default function DataManagementPage() {
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Important</AlertTitle>
                 <AlertDescription>
-                  Importing data will create a backup of the current data as a new version before replacing it. 
-                  You can always rollback to a previous version if needed.
+                  Importing data will create a backup snapshot of the current data before replacing it. 
+                  You can always rollback to a previous snapshot if needed.
                 </AlertDescription>
               </Alert>
 
@@ -421,7 +430,7 @@ export default function DataManagementPage() {
               <div className="flex flex-col items-start gap-4 sm:flex-row">
                 <input
                   type="file"
-                  accept=".xlsx,.xls"
+                  accept=".json"
                   onChange={handleImport}
                   ref={fileInputRef}
                   className="hidden"
@@ -442,14 +451,14 @@ export default function DataManagementPage() {
                       ) : (
                         <>
                           <Upload className="mr-2 h-4 w-4" />
-                          Select Excel File
+                          Select JSON File
                         </>
                       )}
                     </span>
                   </Button>
                 </label>
                 <p className="text-sm text-muted-foreground">
-                  Supported formats: .xlsx, .xls
+                  Supported format: .json
                 </p>
               </div>
             </CardContent>
@@ -459,46 +468,54 @@ export default function DataManagementPage() {
         <TabsContent value="rollback" className="mt-4">
           <Card className="border-sidebar-border bg-card">
             <CardHeader>
-              <CardTitle>Version History</CardTitle>
-              <CardDescription>
-                View and restore previous versions of your data. Each import creates a new version snapshot.
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Snapshot History</CardTitle>
+                  <CardDescription>
+                    View and restore previous snapshots of your data. Each import creates a new snapshot.
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleCreateSnapshot}>
+                  <History className="mr-2 h-4 w-4" />
+                  Create Snapshot
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              {versions.length === 0 ? (
+              {snapshots.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground">
                   <History className="mx-auto mb-2 h-12 w-12 opacity-50" />
-                  <p>No version history available yet.</p>
-                  <p className="text-sm">Versions are created when you import data.</p>
+                  <p>No snapshots available yet.</p>
+                  <p className="text-sm">Snapshots are created when you import data or manually.</p>
                 </div>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Version</TableHead>
+                      <TableHead>Snapshot ID</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead className="text-right">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {versions.map((version) => (
-                      <TableRow key={version.version}>
+                    {snapshots.map((snapshot, index) => (
+                      <TableRow key={snapshot.id}>
                         <TableCell>
-                          <Badge variant={version.version === currentVersion - 1 ? "default" : "secondary"}>
-                            v{version.version}
+                          <Badge variant={index === 0 ? "default" : "secondary"}>
+                            {snapshot.id.substring(0, 15)}...
                           </Badge>
                         </TableCell>
-                        <TableCell>{formatDate(version.created_at)}</TableCell>
+                        <TableCell>{formatDate(snapshot.timestamp)}</TableCell>
                         <TableCell className="max-w-[200px] truncate">
-                          {version.description}
+                          {snapshot.description}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                              setSelectedVersion(version.version)
+                              setSelectedSnapshot(snapshot.id)
                               setRollbackDialogOpen(true)
                             }}
                           >
@@ -528,14 +545,14 @@ export default function DataManagementPage() {
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-              {statCategories.map(({ label, key, color }) => (
+              {nodeCategories.map(({ label, key, color }) => (
                 <div
                   key={key}
                   className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
                 >
                   <span className="text-sm text-muted-foreground">{label}</span>
                   <Badge className={color}>
-                    {stats?.[key as keyof DatabaseStats] ?? 0}
+                    {stats?.[key] || 0}
                   </Badge>
                 </div>
               ))}
@@ -547,10 +564,9 @@ export default function DataManagementPage() {
       <Dialog open={rollbackDialogOpen} onOpenChange={setRollbackDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm Rollback</DialogTitle>
+            <DialogTitle>Restore from Snapshot</DialogTitle>
             <DialogDescription>
-              Are you sure you want to rollback to version {selectedVersion}? 
-              This will replace the current database with the data from that version.
+              Are you sure you want to restore from this snapshot? Current data will be replaced with the snapshot data.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -561,12 +577,12 @@ export default function DataManagementPage() {
               {rollingBack ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Rolling back...
+                  Restoring...
                 </>
               ) : (
                 <>
                   <RotateCcw className="mr-2 h-4 w-4" />
-                  Confirm Rollback
+                  Restore
                 </>
               )}
             </Button>
