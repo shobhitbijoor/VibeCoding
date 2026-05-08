@@ -9,6 +9,7 @@ import {
   HelpCircle,
   ChevronLeft,
   Zap,
+  Database,
 } from "lucide-react"
 import {
   Sidebar,
@@ -47,6 +48,12 @@ const mainNavItems = [
     title: "AI Assistant",
     icon: Sparkles,
     href: "/assistant",
+    disabled: false,
+  },
+  {
+    title: "Data Import/Export",
+    icon: Database,
+    href: "/data-management",
     disabled: false,
   },
 ]
