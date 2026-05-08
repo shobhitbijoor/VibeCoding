@@ -9,10 +9,11 @@ import {
 import { z } from 'zod'
 import { getGraphDatabase } from '@/lib/kuzu-graph'
 
-// Get the graph database instance
+// Initialize the graph database singleton
 const graphDb = getGraphDatabase()
 
-export const maxDuration = 60 // Max duration for streaming
+// Max duration for streaming
+export const maxDuration = 60
 
 // Graph Schema for the LLM to understand
 const GRAPH_SCHEMA = `
@@ -86,11 +87,11 @@ const queryGraphTool = tool({
       'getPartTraceability',
     ]).describe('The type of query to execute'),
     params: z.object({
-      nodeLabel: z.string().optional().describe('Node label to filter by (e.g., Customer, Part, Assembly)'),
-      nodeId: z.string().optional().describe('Specific node ID to query'),
-      relType: z.string().optional().describe('Relationship type to filter by'),
-      searchTerm: z.string().optional().describe('Search term for text-based queries'),
-      direction: z.enum(['in', 'out', 'both']).optional().describe('Direction for relationship queries'),
+      nodeLabel: z.string().nullable().describe('Node label to filter by (e.g., Customer, Part, Assembly)'),
+      nodeId: z.string().nullable().describe('Specific node ID to query'),
+      relType: z.string().nullable().describe('Relationship type to filter by'),
+      searchTerm: z.string().nullable().describe('Search term for text-based queries'),
+      direction: z.enum(['in', 'out', 'both']).nullable().describe('Direction for relationship queries'),
     }).describe('Parameters for the query'),
   }),
   execute: async ({ queryType, params }) => {
@@ -140,7 +141,6 @@ const queryGraphTool = tool({
         
         case 'searchNodes':
           if (!params.searchTerm) return { success: false, error: 'searchTerm is required' }
-          // Search across all nodes
           const allNodes = graphDb.getAllNodes()
           const searchResults = allNodes.filter(node => {
             const propsStr = JSON.stringify(node.properties).toLowerCase()
@@ -205,20 +205,13 @@ const tools = {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { messages, model: selectedModel, apiKey }: { 
+  const { messages, model: selectedModel }: { 
     messages: UIMessage[], 
-    model?: string,
-    apiKey?: string 
+    model?: string
   } = body
 
   // Determine which model to use
-  let model = selectedModel || 'openai/gpt-4o-mini'
-  
-  // Build headers for API key if provided
-  const headers: Record<string, string> = {}
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`
-  }
+  const model = selectedModel || 'openai/gpt-4o-mini'
 
   const systemPrompt = `You are a helpful assistant that helps users query a manufacturing/supply chain graph database.
 
