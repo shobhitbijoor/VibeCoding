@@ -12,7 +12,7 @@ import { getGraphDatabase } from '@/lib/kuzu-graph'
 // Get the graph database instance
 const graphDb = getGraphDatabase()
 
-export const maxDuration = 60
+export const maxDuration = 60 // Max duration for streaming
 
 // Graph Schema for the LLM to understand
 const GRAPH_SCHEMA = `
