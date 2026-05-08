@@ -175,46 +175,38 @@ const graphTools = {
 }
 
 // Helper function to get the model based on provider and API key
-function getModel(modelId: string, apiKey?: string) {
-  // Check for environment variable API keys
-  const openaiKey = apiKey || process.env.OPENAI_API_KEY
-  const anthropicKey = apiKey || process.env.ANTHROPIC_API_KEY
-  const googleKey = apiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY
-  
+function getModel(modelId: string, userProvidedApiKey?: string) {
   if (modelId.startsWith('openai/')) {
-    if (!openaiKey) {
+    const apiKey = userProvidedApiKey || process.env.OPENAI_API_KEY
+    if (!apiKey) {
       throw new Error('OpenAI API key is required. Set OPENAI_API_KEY in environment variables or provide an API key in settings.')
     }
-    const openai = createOpenAI({ apiKey: openaiKey })
+    const openai = createOpenAI({ apiKey })
     const modelName = modelId.replace('openai/', '')
     return openai(modelName)
   }
   
   if (modelId.startsWith('anthropic/')) {
-    if (!anthropicKey) {
+    const apiKey = userProvidedApiKey || process.env.ANTHROPIC_API_KEY
+    if (!apiKey) {
       throw new Error('Anthropic API key is required. Set ANTHROPIC_API_KEY in environment variables or provide an API key in settings.')
     }
-    const anthropic = createAnthropic({ apiKey: anthropicKey })
+    const anthropic = createAnthropic({ apiKey })
     const modelName = modelId.replace('anthropic/', '')
     return anthropic(modelName)
   }
   
   if (modelId.startsWith('google/')) {
-    if (!googleKey) {
+    const apiKey = userProvidedApiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    if (!apiKey) {
       throw new Error('Google AI API key is required. Set GOOGLE_GENERATIVE_AI_API_KEY in environment variables or provide an API key in settings.')
     }
-    const google = createGoogleGenerativeAI({ apiKey: googleKey })
+    const google = createGoogleGenerativeAI({ apiKey })
     const modelName = modelId.replace('google/', '')
     return google(modelName)
   }
   
-  // Fallback - try to use the model ID directly with OpenAI if key is available
-  if (openaiKey) {
-    const openai = createOpenAI({ apiKey: openaiKey })
-    return openai('gpt-4o-mini')
-  }
-  
-  throw new Error('No API key configured. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY in your environment variables, or provide an API key in the settings.')
+  throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/`)
 }
 
 export async function POST(req: Request) {
