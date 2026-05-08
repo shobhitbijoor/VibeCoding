@@ -5,6 +5,9 @@ import {
   UIMessage,
   stepCountIs,
 } from 'ai'
+import { createOpenAI } from '@ai-sdk/openai'
+import { createAnthropic } from '@ai-sdk/anthropic'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
 import { getGraphDatabase } from '@/lib/kuzu-graph'
 
@@ -171,6 +174,49 @@ const graphTools = {
   }),
 }
 
+// Helper function to get the model based on provider and API key
+function getModel(modelId: string, apiKey?: string) {
+  // Check for environment variable API keys
+  const openaiKey = apiKey || process.env.OPENAI_API_KEY
+  const anthropicKey = apiKey || process.env.ANTHROPIC_API_KEY
+  const googleKey = apiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+  
+  if (modelId.startsWith('openai/')) {
+    if (!openaiKey) {
+      throw new Error('OpenAI API key is required. Set OPENAI_API_KEY in environment variables or provide an API key in settings.')
+    }
+    const openai = createOpenAI({ apiKey: openaiKey })
+    const modelName = modelId.replace('openai/', '')
+    return openai(modelName)
+  }
+  
+  if (modelId.startsWith('anthropic/')) {
+    if (!anthropicKey) {
+      throw new Error('Anthropic API key is required. Set ANTHROPIC_API_KEY in environment variables or provide an API key in settings.')
+    }
+    const anthropic = createAnthropic({ apiKey: anthropicKey })
+    const modelName = modelId.replace('anthropic/', '')
+    return anthropic(modelName)
+  }
+  
+  if (modelId.startsWith('google/')) {
+    if (!googleKey) {
+      throw new Error('Google AI API key is required. Set GOOGLE_GENERATIVE_AI_API_KEY in environment variables or provide an API key in settings.')
+    }
+    const google = createGoogleGenerativeAI({ apiKey: googleKey })
+    const modelName = modelId.replace('google/', '')
+    return google(modelName)
+  }
+  
+  // Fallback - try to use the model ID directly with OpenAI if key is available
+  if (openaiKey) {
+    const openai = createOpenAI({ apiKey: openaiKey })
+    return openai('gpt-4o-mini')
+  }
+  
+  throw new Error('No API key configured. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY in your environment variables, or provide an API key in the settings.')
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -181,13 +227,10 @@ export async function POST(req: Request) {
     }
 
     // Default to OpenAI GPT-4o-mini if no model specified
-    const model = selectedModel || 'openai/gpt-4o-mini'
-
-    // Build headers if custom API key is provided
-    const headers: Record<string, string> = {}
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`
-    }
+    const modelId = selectedModel || 'openai/gpt-4o-mini'
+    
+    // Get the appropriate model based on provider and API key
+    const model = getModel(modelId, apiKey)
 
     const result = streamText({
       model,
@@ -208,14 +251,14 @@ Important guidelines:
       messages: await convertToModelMessages(messages),
       tools: graphTools,
       stopWhen: stepCountIs(10),
-      headers: Object.keys(headers).length > 0 ? headers : undefined,
     })
 
     return result.toUIMessageStreamResponse()
   } catch (error) {
     console.error('Copilot API error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Failed to process request'
     return new Response(
-      JSON.stringify({ error: 'Failed to process request', details: String(error) }),
+      JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

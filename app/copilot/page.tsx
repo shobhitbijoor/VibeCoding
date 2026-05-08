@@ -23,19 +23,19 @@ import {
   Sparkles,
   AlertCircle,
   CheckCircle2,
-  Info
+  Info,
+  ExternalLink
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-// Available LLM models
+// Available LLM models organized by provider
 const AVAILABLE_MODELS = [
-  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", requiresKey: false },
-  { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", requiresKey: false },
-  { id: "openai/gpt-5", name: "GPT-5", provider: "OpenAI", requiresKey: false },
-  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", provider: "Anthropic", requiresKey: false },
-  { id: "anthropic/claude-opus-4", name: "Claude Opus 4", provider: "Anthropic", requiresKey: false },
-  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", requiresKey: false },
-  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google", requiresKey: false },
+  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
+  { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
+  { id: "anthropic/claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
+  { id: "anthropic/claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
+  { id: "google/gemini-1.5-flash", name: "Gemini 1.5 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-1.5-pro", name: "Gemini 1.5 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
 ]
 
 // Example questions for users
@@ -43,13 +43,13 @@ const EXAMPLE_QUESTIONS = [
   "Show me all customers in the database",
   "What assemblies does Acme Corporation have?",
   "List all parts supplied by Precision Parts Inc",
-  "Show me the bill of materials for assembly ASM-2024-001",
+  "Show me the service history for assembly ASM-2024-001",
   "What are the recent failures and their root causes?",
-  "Which parts are currently in stock?",
-  "Show me the service history for all assemblies",
   "What is the warranty status of our assemblies?",
-  "Trace the lineage of part PN-MOTOR-001",
+  "Which parts were manufactured in lot LOT-2024-001?",
+  "Show me all quality inspections and deviations",
   "Give me statistics about the graph database",
+  "Which plant manufactured assembly ASM-2024-002?",
 ]
 
 export default function CopilotPage() {
@@ -57,6 +57,7 @@ export default function CopilotPage() {
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id)
   const [apiKey, setApiKey] = useState("")
   const [showSettings, setShowSettings] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   
@@ -76,6 +77,10 @@ export default function CopilotPage() {
   const { messages, sendMessage, status, setMessages } = useChat({
     transport,
     id: "copilot-session",
+    onError: (err) => {
+      console.error("Chat error:", err)
+      setError(err.message || "An error occurred while processing your request")
+    },
   })
 
   const isLoading = status === "streaming" || status === "submitted"
@@ -90,9 +95,15 @@ export default function CopilotPage() {
     inputRef.current?.focus()
   }, [])
 
+  // Clear error when user types
+  useEffect(() => {
+    if (input) setError(null)
+  }, [input])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
+    setError(null)
     sendMessage({ text: input })
     setInput("")
   }
@@ -104,6 +115,7 @@ export default function CopilotPage() {
 
   const clearChat = () => {
     setMessages([])
+    setError(null)
   }
 
   const getMessageText = (message: typeof messages[0]): string => {
@@ -125,6 +137,7 @@ export default function CopilotPage() {
   }
 
   const selectedModelInfo = AVAILABLE_MODELS.find(m => m.id === selectedModel)
+  const needsApiKey = !apiKey && selectedModelInfo
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
@@ -161,6 +174,19 @@ export default function CopilotPage() {
           </Button>
         </div>
       </div>
+
+      {/* API Key Warning Banner */}
+      {needsApiKey && messages.length === 0 && (
+        <div className="border-b bg-amber-50 px-6 py-3 dark:bg-amber-950">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <p className="text-sm text-amber-800 dark:text-amber-200">
+              <strong>API Key Required:</strong> Please configure your {selectedModelInfo.provider} API key in Settings to use the Copilot.
+              You need <code className="rounded bg-amber-200 px-1 dark:bg-amber-800">{selectedModelInfo.envKey}</code> set in your environment or enter it in the API Key tab.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Main Chat Area */}
@@ -276,6 +302,27 @@ export default function CopilotPage() {
             )}
           </ScrollArea>
 
+          {/* Error Display */}
+          {error && (
+            <div className="mx-auto w-full max-w-3xl px-6 pb-2">
+              <div className="flex items-start gap-2 rounded-lg bg-red-50 p-3 dark:bg-red-950">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-800 dark:text-red-200">Error</p>
+                  <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  onClick={() => setError(null)}
+                >
+                  &times;
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Input Area */}
           <div className="border-t bg-card p-4">
             <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl gap-2">
@@ -296,8 +343,9 @@ export default function CopilotPage() {
               </Button>
             </form>
             <div className="mx-auto mt-2 flex max-w-3xl items-center justify-between text-xs text-muted-foreground">
-              <span>
+              <span className="flex items-center gap-1">
                 Using: <strong>{selectedModelInfo?.name}</strong> ({selectedModelInfo?.provider})
+                {apiKey && <CheckCircle2 className="h-3 w-3 text-green-500" />}
               </span>
               <span>{messages.length} messages in session</span>
             </div>
@@ -307,12 +355,105 @@ export default function CopilotPage() {
         {/* Settings Panel */}
         {showSettings && (
           <div className="w-80 border-l bg-card">
-            <Tabs defaultValue="model" className="h-full">
+            <Tabs defaultValue="api" className="h-full">
               <TabsList className="w-full rounded-none border-b">
-                <TabsTrigger value="model" className="flex-1">Model</TabsTrigger>
                 <TabsTrigger value="api" className="flex-1">API Key</TabsTrigger>
+                <TabsTrigger value="model" className="flex-1">Model</TabsTrigger>
                 <TabsTrigger value="examples" className="flex-1">Examples</TabsTrigger>
               </TabsList>
+              
+              <TabsContent value="api" className="p-4">
+                <div className="space-y-4">
+                  <div className="rounded-lg bg-amber-50 p-3 dark:bg-amber-950">
+                    <div className="flex gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-500" />
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        To use the Copilot, you need an API key from your LLM provider. Enter it below or set it in your environment variables.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="apiKey">API Key</Label>
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Enter your API key for {selectedModelInfo?.provider || "the selected provider"}
+                    </p>
+                    <div className="relative">
+                      <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="apiKey"
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder={selectedModelInfo?.provider === "OpenAI" ? "sk-..." : "Enter API key..."}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  
+                  {apiKey && (
+                    <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 dark:bg-green-950">
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      <span className="text-xs text-green-700 dark:text-green-300">
+                        API key configured for this session
+                      </span>
+                    </div>
+                  )}
+                  
+                  <Card>
+                    <CardHeader className="p-4 pb-2">
+                      <CardTitle className="text-sm">Environment Variables</CardTitle>
+                      <CardDescription className="text-xs">
+                        For production, set these in your .env file:
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2 p-4 pt-0">
+                      <code className="block rounded bg-muted p-2 text-xs">
+                        # OpenAI<br/>
+                        OPENAI_API_KEY=sk-...
+                      </code>
+                      <code className="block rounded bg-muted p-2 text-xs">
+                        # Anthropic<br/>
+                        ANTHROPIC_API_KEY=sk-ant-...
+                      </code>
+                      <code className="block rounded bg-muted p-2 text-xs">
+                        # Google<br/>
+                        GOOGLE_GENERATIVE_AI_API_KEY=...
+                      </code>
+                    </CardContent>
+                  </Card>
+                  
+                  <div className="space-y-2">
+                    <Label className="text-xs">Get API Keys:</Label>
+                    <div className="flex flex-col gap-1">
+                      <a
+                        href="https://platform.openai.com/api-keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        OpenAI API Keys <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <a
+                        href="https://console.anthropic.com/settings/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        Anthropic API Keys <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        Google AI API Keys <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
               
               <TabsContent value="model" className="p-4">
                 <div className="space-y-4">
@@ -355,8 +496,8 @@ export default function CopilotPage() {
                           <span>{selectedModelInfo?.provider}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">API Key:</span>
-                          <span>{selectedModelInfo?.requiresKey ? "Required" : "Not Required"}</span>
+                          <span className="text-muted-foreground">Env Variable:</span>
+                          <code className="text-xs">{selectedModelInfo?.envKey}</code>
                         </div>
                       </div>
                     </CardContent>
@@ -366,55 +507,10 @@ export default function CopilotPage() {
                     <div className="flex gap-2">
                       <Info className="h-4 w-4 shrink-0 text-blue-500" />
                       <p className="text-xs text-blue-700 dark:text-blue-300">
-                        All models use the Vercel AI Gateway which provides zero-config access to OpenAI, Anthropic, and Google models.
+                        Different models have different capabilities and pricing. GPT-4o Mini and Claude 3.5 Haiku are good for quick queries, while GPT-4o and Claude 3.5 Sonnet are better for complex analysis.
                       </p>
                     </div>
                   </div>
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="api" className="p-4">
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="apiKey">Custom API Key (Optional)</Label>
-                    <p className="mb-2 text-xs text-muted-foreground">
-                      Override the default API key for selected providers
-                    </p>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="apiKey"
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder="sk-..."
-                        className="pl-10"
-                      />
-                    </div>
-                  </div>
-                  
-                  {apiKey && (
-                    <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 dark:bg-green-950">
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      <span className="text-xs text-green-700 dark:text-green-300">
-                        Custom API key configured
-                      </span>
-                    </div>
-                  )}
-                  
-                  <Card>
-                    <CardHeader className="p-4 pb-2">
-                      <CardTitle className="text-sm">Environment Variables</CardTitle>
-                      <CardDescription className="text-xs">
-                        For production, configure these in your .env file
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-0">
-                      <code className="block rounded bg-muted p-2 text-xs">
-                        AI_GATEWAY_API_KEY=your_key_here
-                      </code>
-                    </CardContent>
-                  </Card>
                 </div>
               </TabsContent>
               
