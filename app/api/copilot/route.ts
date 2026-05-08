@@ -7,7 +7,10 @@ import {
   stepCountIs,
 } from 'ai'
 import { z } from 'zod'
-import { graphDb } from '@/lib/kuzu-graph'
+import { getGraphDatabase } from '@/lib/kuzu-graph'
+
+// Get the graph database instance
+const graphDb = getGraphDatabase()
 
 export const maxDuration = 60
 
