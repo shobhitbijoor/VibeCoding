@@ -199,41 +199,40 @@ export default function CopilotPage() {
     // Calculate RAGAS metrics
     const contextData = databaseResponses.map(r => r.data).filter(Boolean)
     const ragasMetrics = calculateRAGASMetrics(userQuestion, contextData, assistantResponse)
-      
-      // Create complete log entry
-      const logEntry: SessionLogEntry = {
-        id: `entry-${messageId}`,
+    
+    // Create complete log entry
+    const logEntry: SessionLogEntry = {
+      id: `entry-${messageId}`,
+      timestamp: new Date().toISOString(),
+      userQuestion,
+      cypherQueries,
+      databaseResponses,
+      llmResponse: {
         timestamp: new Date().toISOString(),
-        userQuestion,
-        cypherQueries,
-        databaseResponses,
-        llmResponse: {
-          timestamp: new Date().toISOString(),
-          content: assistantResponse,
-          model: appliedModel,
-        },
-        ragasMetrics,
-      }
-      
-      // Update session log
-      setSessionLog(prev => {
-        const newEntries = [...prev.entries, logEntry]
-        const totalResponseTime = newEntries.reduce((sum, e) => 
-          sum + e.databaseResponses.reduce((s, r) => s + r.executionTimeMs, 0), 0
-        )
-        const totalResponses = newEntries.reduce((sum, e) => sum + e.databaseResponses.length, 0)
-        const avgRagas = newEntries.reduce((sum, e) => sum + e.ragasMetrics.overallScore, 0) / newEntries.length
-        
-        return {
-          ...prev,
-          model: appliedModel,
-          entries: newEntries,
-          totalQueries: newEntries.reduce((sum, e) => sum + e.cypherQueries.length, 0),
-          averageResponseTimeMs: totalResponses > 0 ? totalResponseTime / totalResponses : 0,
-          averageRAGASScore: avgRagas,
-        }
-      })
+        content: assistantResponse,
+        model: appliedModel,
+      },
+      ragasMetrics,
     }
+    
+    // Update session log
+    setSessionLog(prev => {
+      const newEntries = [...prev.entries, logEntry]
+      const totalResponseTime = newEntries.reduce((sum, e) => 
+        sum + e.databaseResponses.reduce((s, r) => s + r.executionTimeMs, 0), 0
+      )
+      const totalResponses = newEntries.reduce((sum, e) => sum + e.databaseResponses.length, 0)
+      const avgRagas = newEntries.reduce((sum, e) => sum + e.ragasMetrics.overallScore, 0) / newEntries.length
+      
+      return {
+        ...prev,
+        model: appliedModel,
+        entries: newEntries,
+        totalQueries: newEntries.reduce((sum, e) => sum + e.cypherQueries.length, 0),
+        averageResponseTimeMs: totalResponses > 0 ? totalResponseTime / totalResponses : 0,
+        averageRAGASScore: avgRagas,
+      }
+    })
   }, [status, messages, appliedModel])
 
   const handleExampleClick = (question: string) => {
