@@ -196,9 +196,9 @@ const graphTools = {
   }),
   
   getAllEntities: tool({
-    description: 'Get all entities of a specific type from the database. Use this to list all customers, suppliers, assemblies, parts, etc.',
+    description: 'Get all entities of a specific type from the database. Use this to list all customers, suppliers, assemblies, parts, failures, root_causes, deviations, quality_inspections, etc.',
     inputSchema: z.object({
-      entityType: z.enum(['customers', 'suppliers', 'assemblies', 'parts', 'plants', 'stations', 'warehouses', 'failures', 'service_records']).describe('The type of entities to retrieve'),
+      entityType: z.enum(['customers', 'suppliers', 'assemblies', 'parts', 'plants', 'stations', 'warehouses', 'failures', 'service_records', 'root_causes', 'deviations', 'quality_inspections', 'purchase_orders', 'warranties']).describe('The type of entities to retrieve'),
     }),
     execute: async ({ entityType }) => {
       try {
@@ -226,10 +226,25 @@ const graphTools = {
             data = graphDb.getNodesByLabel('Warehouse');
             break;
           case 'failures':
-            data = graphDb.getNodesByLabel('Failure');
+            data = graphDb.getAllFailures();
             break;
           case 'service_records':
             data = graphDb.getNodesByLabel('ServiceRecord');
+            break;
+          case 'root_causes':
+            data = graphDb.getAllRootCauses();
+            break;
+          case 'deviations':
+            data = graphDb.getNodesByLabel('Deviation');
+            break;
+          case 'quality_inspections':
+            data = graphDb.getNodesByLabel('QualityInspection');
+            break;
+          case 'purchase_orders':
+            data = graphDb.getNodesByLabel('SupplierPO');
+            break;
+          case 'warranties':
+            data = graphDb.getNodesByLabel('Warranty');
             break;
           default:
             return { success: false, error: 'Unknown entity type' };
@@ -241,6 +256,154 @@ const graphTools = {
             type: n.label,
             properties: n.properties
           }))
+        };
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
+
+  getFailureDetails: tool({
+    description: 'Get comprehensive details about a failure including the root cause, affected assembly, affected part, and related deviations. Use this when investigating failures.',
+    inputSchema: z.object({
+      failureId: z.string().describe('The failure ID (e.g., "FLR-001" or "FLR-002")'),
+    }),
+    execute: async ({ failureId }) => {
+      try {
+        const failure = graphDb.getFailureById(failureId);
+        if (!failure) {
+          return { success: false, error: `Failure "${failureId}" not found` };
+        }
+
+        const rootCauses = graphDb.getRootCauseForFailure(failureId);
+        const assembly = graphDb.getAssemblyForFailure(failureId);
+        const part = graphDb.getPartForFailure(failureId);
+        
+        // Get deviations for the affected part
+        let partDeviations: ReturnType<typeof graphDb.getNodesByLabel> = [];
+        if (part) {
+          partDeviations = graphDb.getDeviationsForPart(part.properties.partNumber as string);
+        }
+
+        return {
+          success: true,
+          data: {
+            failure: { id: failure.id, ...failure.properties },
+            rootCauses: rootCauses.map(rc => ({ id: rc.id, ...rc.properties })),
+            affectedAssembly: assembly ? { id: assembly.id, ...assembly.properties } : null,
+            affectedPart: part ? { id: part.id, ...part.properties } : null,
+            relatedDeviations: partDeviations.map(d => ({ id: d.id, ...d.properties })),
+          }
+        };
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
+
+  getAssemblyTraceability: tool({
+    description: 'Get complete traceability for an assembly including customer, location, warranty, parts, service history, failures, inspections, and deviations.',
+    inputSchema: z.object({
+      assemblyId: z.string().describe('The assembly number (e.g., "ASM-5001") or name'),
+    }),
+    execute: async ({ assemblyId }) => {
+      try {
+        const trace = graphDb.getAssemblyTraceability(assemblyId);
+        if (!trace.assembly) {
+          return { success: false, error: `Assembly "${assemblyId}" not found` };
+        }
+
+        return {
+          success: true,
+          data: {
+            assembly: { id: trace.assembly.id, ...trace.assembly.properties },
+            customer: trace.customer ? { id: trace.customer.id, ...trace.customer.properties } : null,
+            location: trace.location ? { id: trace.location.id, ...trace.location.properties } : null,
+            warranty: trace.warranty ? { id: trace.warranty.id, ...trace.warranty.properties } : null,
+            parts: trace.parts.map(p => ({ id: p.id, ...p.properties })),
+            serviceRecords: trace.serviceRecords.map(s => ({ id: s.id, ...s.properties })),
+            failures: trace.failures.map(f => ({ id: f.id, ...f.properties })),
+            inspections: trace.inspections.map(i => ({ id: i.id, ...i.properties })),
+            deviations: trace.deviations.map(d => ({ id: d.id, ...d.properties })),
+          }
+        };
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
+
+  getPartTraceability: tool({
+    description: 'Get complete traceability for a part including supplier, purchase order, warehouse, plant, station, assemblies it is used in, inspections, and deviations.',
+    inputSchema: z.object({
+      partId: z.string().describe('The part number (e.g., "PN-10001") or name'),
+    }),
+    execute: async ({ partId }) => {
+      try {
+        const trace = graphDb.getPartTraceability(partId);
+        if (!trace.part) {
+          return { success: false, error: `Part "${partId}" not found` };
+        }
+
+        return {
+          success: true,
+          data: {
+            part: { id: trace.part.id, ...trace.part.properties },
+            supplier: trace.supplier ? { id: trace.supplier.id, ...trace.supplier.properties } : null,
+            purchaseOrder: trace.purchaseOrder ? { id: trace.purchaseOrder.id, ...trace.purchaseOrder.properties } : null,
+            warehouse: trace.warehouse ? { id: trace.warehouse.id, ...trace.warehouse.properties } : null,
+            plant: trace.plant ? { id: trace.plant.id, ...trace.plant.properties } : null,
+            station: trace.station ? { id: trace.station.id, ...trace.station.properties } : null,
+            assemblies: trace.assemblies.map(a => ({ id: a.id, ...a.properties })),
+            inspections: trace.inspections.map(i => ({ id: i.id, ...i.properties })),
+            deviations: trace.deviations.map(d => ({ id: d.id, ...d.properties })),
+          }
+        };
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
+
+  getPartsFromSameLot: tool({
+    description: 'Get all parts from the same lot number. Useful for tracing potentially affected parts when a quality issue is found.',
+    inputSchema: z.object({
+      partId: z.string().describe('The part number to find lot mates for'),
+    }),
+    execute: async ({ partId }) => {
+      try {
+        const parts = graphDb.getPartsFromSameLot(partId);
+        if (parts.length === 0) {
+          return { success: false, error: `No parts found for "${partId}" or lot information unavailable` };
+        }
+        return {
+          success: true,
+          data: parts.map(p => ({ id: p.id, ...p.properties }))
+        };
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
+
+  getDeviations: tool({
+    description: 'Get all deviations for a part or assembly. Use this to check quality issues during receiving, assembly, or commissioning.',
+    inputSchema: z.object({
+      entityType: z.enum(['part', 'assembly']).describe('Whether to get deviations for a part or assembly'),
+      entityId: z.string().describe('The part number (e.g., "PN-10002") or assembly number (e.g., "ASM-5002")'),
+    }),
+    execute: async ({ entityType, entityId }) => {
+      try {
+        let deviations;
+        if (entityType === 'part') {
+          deviations = graphDb.getDeviationsForPart(entityId);
+        } else {
+          deviations = graphDb.getDeviationsForAssembly(entityId);
+        }
+        
+        return {
+          success: true,
+          data: deviations.map(d => ({ id: d.id, ...d.properties }))
         };
       } catch (error) {
         return { success: false, error: String(error) }
@@ -305,34 +468,53 @@ export async function POST(req: Request) {
       
 ${GRAPH_SCHEMA}
 
-## How to Query the Database
+## Available Tools
 
-You have access to three tools:
+You have several tools for querying the graph database:
 
-1. **getAllEntities** - Use this to list all entities of a type (customers, suppliers, assemblies, parts, etc.)
-2. **searchGraph** - Use this to search for entities by name or property value
-3. **queryGraph** - Use this to query relationships and get detailed information
+### Entity Listing & Search
+- **getAllEntities** - List all entities of a type (customers, suppliers, assemblies, parts, failures, root_causes, deviations, quality_inspections, etc.)
+- **searchGraph** - Search for entities by name or any property value
+- **getGraphStats** - Get database statistics
 
-### Query Strategy:
+### Traceability Tools (USE THESE FOR INVESTIGATIONS)
+- **getFailureDetails** - Get complete failure info including root cause, affected assembly, affected part, and related deviations
+- **getAssemblyTraceability** - Get full traceability: customer, location, warranty, parts, service history, failures, inspections, deviations
+- **getPartTraceability** - Get full traceability: supplier, PO, warehouse, plant, station, assemblies, inspections, deviations
+- **getPartsFromSameLot** - Find all parts from the same lot (for containment)
+- **getDeviations** - Get deviations for a specific part or assembly
 
-1. **When users ask about a specific entity by name** (e.g., "parts from Precision Parts Inc"):
-   - First use searchGraph with the name to find the entity and get its ID
-   - Then use queryGraph with the ID to get related data
-   - You can also use queryGraph directly - it supports searching by name!
+### Relationship Queries
+- **queryGraph** - Query specific relationships (assembly_parts, assembly_failures, failure_root_causes, etc.)
 
-2. **When users want to list all entities**:
-   - Use getAllEntities with the entity type
+## Query Strategy
 
-3. **For relationship queries** (e.g., "service history for assembly X"):
-   - The queryGraph tool accepts both IDs AND names/serial numbers
-   - Just pass the name or serial number as the ID parameter and it will find the match
+1. **For failure investigations** (e.g., "what failed?", "tell me about FLR-002"):
+   - Use getFailureDetails with the failure ID to get root cause, affected assembly/part, and deviations
 
-### Important Notes:
-- Assembly numbers look like "ASM-5001", "ASM-5002", etc.
-- Part numbers look like "PN-10001", "PN-10002", etc.
-- Supplier names: "Precision Parts Inc.", "Global Components Ltd.", "ElectroComponents Ltd.", "PolymerTech Inc.", "CastMaster Foundry"
-- The queryGraph tool will try to match by ID first, then by name/number
-- When querying, you can use the assembly number (like "ASM-5001") or part of the name
+2. **For assembly questions** (e.g., "service history for ASM-5001"):
+   - Use getAssemblyTraceability for complete info OR queryGraph for specific relationships
+
+3. **For part tracing** (e.g., "where did this part come from?"):
+   - Use getPartTraceability for full supply chain visibility
+
+4. **For quality/deviation questions**:
+   - Use getDeviations with the part or assembly ID
+
+5. **For lot containment** (e.g., "other parts from the same lot"):
+   - Use getPartsFromSameLot
+
+## Data Reference
+
+**Assemblies:** ASM-5001 (Electric Drive Unit), ASM-5002 (Power Electronics Module), ASM-5003 (Thermal Management System), ASM-5004 (Sensor Array Module)
+
+**Parts:** PN-10001 (High-Precision Bearing), PN-10002 (Motor Controller PCB), PN-10003 (Aluminum Housing), PN-10004 (Rubber Seal Ring), PN-10005 (Brushless DC Motor), etc.
+
+**Failures:** FLR-001 (Bearing wear, affects ASM-5001/PN-10001), FLR-002 (Motor controller overheat, affects ASM-5002/PN-10002), FLR-003 (Cooling fan noise, affects ASM-5003)
+
+**Deviations:** DEV-001 (Thermal paste application deviation on PN-10002), DEV-002 (Motor windings resistance issue on PN-10005), DEV-003 (Installation torque deviation on ASM-5003)
+
+**Suppliers:** PrecisionParts Co., SteelWorks International, ElectroComponents Ltd., PolymerTech Inc., CastMaster Foundry
 
 When presenting data, format it nicely using markdown tables or lists as appropriate.
 Always explain your findings in a clear, human-readable way.`,

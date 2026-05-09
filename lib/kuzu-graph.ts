@@ -594,6 +594,236 @@ class KuzuGraph {
     });
   }
 
+  // Get all failures
+  getAllFailures(): Node[] {
+    return this.getNodesByLabel('Failure');
+  }
+
+  // Get all root causes
+  getAllRootCauses(): Node[] {
+    return this.getNodesByLabel('RootCause');
+  }
+
+  // Get failure by ID or failure ID
+  getFailureById(failureId: string): Node | undefined {
+    let failure = this.getNodeById(failureId);
+    if (!failure) {
+      const allFailures = this.getNodesByLabel('Failure');
+      failure = allFailures.find(f => 
+        f.properties.failureId?.toString().toLowerCase() === failureId.toLowerCase()
+      );
+    }
+    return failure;
+  }
+
+  // Get root cause for a failure
+  getRootCauseForFailure(failureId: string): Node[] {
+    const failure = this.getFailureById(failureId);
+    if (!failure) return [];
+    return this.getConnectedNodes(failure.id, 'CAUSED_BY', 'out');
+  }
+
+  // Get assembly for a failure
+  getAssemblyForFailure(failureId: string): Node | undefined {
+    const failure = this.getFailureById(failureId);
+    if (!failure) return undefined;
+    
+    // Check the failure's assemblyAffected property
+    const assemblyNumber = failure.properties.assemblyAffected as string;
+    if (assemblyNumber) {
+      const assemblies = this.getNodesByLabel('Assembly');
+      return assemblies.find(a => a.properties.assemblyNumber === assemblyNumber);
+    }
+    
+    // Also check relationships
+    const related = this.getConnectedNodes(failure.id, 'RELATED_TO_FAILURE', 'in');
+    return related.find(n => n.label === 'Assembly');
+  }
+
+  // Get part that caused a failure
+  getPartForFailure(failureId: string): Node | undefined {
+    const failure = this.getFailureById(failureId);
+    if (!failure) return undefined;
+    
+    // Check the failure's partAffected property
+    const partNumber = failure.properties.partAffected as string;
+    if (partNumber) {
+      const parts = this.getNodesByLabel('Part');
+      return parts.find(p => p.properties.partNumber === partNumber);
+    }
+    
+    // Also check relationships
+    const related = this.getConnectedNodes(failure.id, 'RELATED_TO_FAILURE', 'in');
+    return related.find(n => n.label === 'Part');
+  }
+
+  // Get full traceability for a part
+  getPartTraceability(partId: string): {
+    part: Node | undefined;
+    supplier: Node | undefined;
+    purchaseOrder: Node | undefined;
+    warehouse: Node | undefined;
+    plant: Node | undefined;
+    station: Node | undefined;
+    assemblies: Node[];
+    inspections: Node[];
+    deviations: Node[];
+  } {
+    let part = this.getNodeById(partId);
+    if (!part) {
+      const allParts = this.getNodesByLabel('Part');
+      part = allParts.find(p => 
+        p.properties.partNumber?.toString().toLowerCase() === partId.toLowerCase() ||
+        p.properties.name?.toString().toLowerCase().includes(partId.toLowerCase())
+      );
+    }
+    
+    if (!part) {
+      return {
+        part: undefined,
+        supplier: undefined,
+        purchaseOrder: undefined,
+        warehouse: undefined,
+        plant: undefined,
+        station: undefined,
+        assemblies: [],
+        inspections: [],
+        deviations: [],
+      };
+    }
+
+    const suppliers = this.getConnectedNodes(part.id, 'SUPPLIED_BY', 'out');
+    const pos = this.getConnectedNodes(part.id, 'SOURCED_FROM', 'out');
+    const warehouses = this.getConnectedNodes(part.id, 'STORED_AT', 'out');
+    const plants = this.getConnectedNodes(part.id, 'MANUFACTURED_AT', 'out');
+    const stations = this.getConnectedNodes(part.id, 'PROCESSED_AT', 'out');
+    const assemblies = this.getConnectedNodes(part.id, 'CONTAINS_PART', 'in');
+    const inspections = this.getConnectedNodes(part.id, 'INSPECTED_BY', 'out');
+    const deviations = this.getConnectedNodes(part.id, 'HAS_DEVIATION', 'out');
+
+    return {
+      part,
+      supplier: suppliers[0],
+      purchaseOrder: pos[0],
+      warehouse: warehouses[0],
+      plant: plants[0],
+      station: stations[0],
+      assemblies,
+      inspections,
+      deviations,
+    };
+  }
+
+  // Get full traceability for an assembly
+  getAssemblyTraceability(assemblyId: string): {
+    assembly: Node | undefined;
+    customer: Node | undefined;
+    location: Node | undefined;
+    warranty: Node | undefined;
+    parts: Node[];
+    serviceRecords: Node[];
+    failures: Node[];
+    inspections: Node[];
+    deviations: Node[];
+  } {
+    let assembly = this.getNodeById(assemblyId);
+    if (!assembly) {
+      const allAssemblies = this.getNodesByLabel('Assembly');
+      assembly = allAssemblies.find(a => 
+        a.properties.assemblyNumber?.toString().toLowerCase() === assemblyId.toLowerCase() ||
+        a.properties.name?.toString().toLowerCase().includes(assemblyId.toLowerCase())
+      );
+    }
+
+    if (!assembly) {
+      return {
+        assembly: undefined,
+        customer: undefined,
+        location: undefined,
+        warranty: undefined,
+        parts: [],
+        serviceRecords: [],
+        failures: [],
+        inspections: [],
+        deviations: [],
+      };
+    }
+
+    const locations = this.getConnectedNodes(assembly.id, 'COMMISSIONED_AT', 'out');
+    const location = locations[0];
+    
+    // Find customer from location
+    let customer: Node | undefined;
+    if (location) {
+      const customers = this.getConnectedNodes(location.id, 'COMMISSIONED_AT', 'in').filter(n => n.label === 'Customer');
+      customer = customers[0];
+    }
+
+    const warranties = this.getConnectedNodes(assembly.id, 'HAS_WARRANTY', 'out');
+    const parts = this.getConnectedNodes(assembly.id, 'CONTAINS_PART', 'out');
+    const serviceRecords = this.getConnectedNodes(assembly.id, 'HAS_SERVICE_RECORD', 'out');
+    const failures = this.getConnectedNodes(assembly.id, 'RELATED_TO_FAILURE', 'out');
+    const inspections = this.getConnectedNodes(assembly.id, 'INSPECTED_BY', 'out');
+    const deviations = this.getConnectedNodes(assembly.id, 'HAS_DEVIATION', 'out');
+
+    return {
+      assembly,
+      customer,
+      location,
+      warranty: warranties[0],
+      parts,
+      serviceRecords,
+      failures,
+      inspections,
+      deviations,
+    };
+  }
+
+  // Get parts from same lot
+  getPartsFromSameLot(partId: string): Node[] {
+    let part = this.getNodeById(partId);
+    if (!part) {
+      const allParts = this.getNodesByLabel('Part');
+      part = allParts.find(p => 
+        p.properties.partNumber?.toString().toLowerCase() === partId.toLowerCase()
+      );
+    }
+    if (!part) return [];
+
+    const lotNumber = part.properties.lotNumber as string;
+    if (!lotNumber) return [];
+
+    return this.getNodesByLabel('Part').filter(p => 
+      p.properties.lotNumber === lotNumber
+    );
+  }
+
+  // Get deviations for part
+  getDeviationsForPart(partId: string): Node[] {
+    let part = this.getNodeById(partId);
+    if (!part) {
+      const allParts = this.getNodesByLabel('Part');
+      part = allParts.find(p => 
+        p.properties.partNumber?.toString().toLowerCase() === partId.toLowerCase()
+      );
+    }
+    if (!part) return [];
+    return this.getConnectedNodes(part.id, 'HAS_DEVIATION', 'out');
+  }
+
+  // Get deviations for assembly
+  getDeviationsForAssembly(assemblyId: string): Node[] {
+    let assembly = this.getNodeById(assemblyId);
+    if (!assembly) {
+      const allAssemblies = this.getNodesByLabel('Assembly');
+      assembly = allAssemblies.find(a => 
+        a.properties.assemblyNumber?.toString().toLowerCase() === assemblyId.toLowerCase()
+      );
+    }
+    if (!assembly) return [];
+    return this.getConnectedNodes(assembly.id, 'HAS_DEVIATION', 'out');
+  }
+
   // Initialize with comprehensive dummy data
   private initializeWithDummyData(): void {
     // ===== CUSTOMERS =====
@@ -1040,6 +1270,25 @@ class KuzuGraph {
     this.createRelationship('ORDERED_FROM', purchaseOrders[4].id, suppliers[3].id, {});
     this.createRelationship('ORDERED_FROM', purchaseOrders[5].id, suppliers[2].id, {});
 
+    // Link parts to POs (SOURCED_FROM - which PO each part came from)
+    this.createRelationship('SOURCED_FROM', parts[0].id, purchaseOrders[0].id, { quantity: 5000, receivedDate: '2024-02-01' });
+    this.createRelationship('SOURCED_FROM', parts[4].id, purchaseOrders[0].id, { quantity: 1200, receivedDate: '2024-02-01' });
+    this.createRelationship('SOURCED_FROM', parts[1].id, purchaseOrders[1].id, { quantity: 2000, receivedDate: '2024-02-15' });
+    this.createRelationship('SOURCED_FROM', parts[7].id, purchaseOrders[1].id, { quantity: 8000, receivedDate: '2024-02-15' });
+    this.createRelationship('SOURCED_FROM', parts[8].id, purchaseOrders[5].id, { quantity: 3000, receivedDate: '2024-03-15' });
+    this.createRelationship('SOURCED_FROM', parts[9].id, purchaseOrders[5].id, { quantity: 1500, receivedDate: '2024-03-15' });
+    this.createRelationship('SOURCED_FROM', parts[2].id, purchaseOrders[2].id, { quantity: 3500, receivedDate: '2024-02-28' });
+    this.createRelationship('SOURCED_FROM', parts[6].id, purchaseOrders[2].id, { quantity: 2000, receivedDate: '2024-02-28' });
+    this.createRelationship('SOURCED_FROM', parts[3].id, purchaseOrders[4].id, { quantity: 25000, receivedDate: '2024-03-10' });
+    this.createRelationship('SOURCED_FROM', parts[5].id, purchaseOrders[4].id, { quantity: 500, receivedDate: '2024-03-10' });
+
+    // Link POs to warehouses (where parts were delivered)
+    this.createRelationship('DELIVERED_TO', purchaseOrders[0].id, warehouses[1].id, { deliveryDate: '2024-02-01' });
+    this.createRelationship('DELIVERED_TO', purchaseOrders[1].id, warehouses[0].id, { deliveryDate: '2024-02-15' });
+    this.createRelationship('DELIVERED_TO', purchaseOrders[2].id, warehouses[1].id, { deliveryDate: '2024-02-28' });
+    this.createRelationship('DELIVERED_TO', purchaseOrders[4].id, warehouses[1].id, { deliveryDate: '2024-03-10' });
+    this.createRelationship('DELIVERED_TO', purchaseOrders[5].id, warehouses[0].id, { deliveryDate: '2024-03-15' });
+
     // ===== WARRANTIES =====
     const warranties = [
       this.createNode('Warranty', {
@@ -1111,6 +1360,9 @@ class KuzuGraph {
         severity: 'Medium',
         description: 'Bearing premature wear detected',
         impactLevel: 'Production Delay',
+        assemblyAffected: 'ASM-5001',
+        partAffected: 'PN-10001',
+        status: 'Resolved',
       }),
       this.createNode('Failure', {
         failureId: 'FLR-002',
@@ -1118,6 +1370,19 @@ class KuzuGraph {
         severity: 'High',
         description: 'Motor controller overheat',
         impactLevel: 'Line Stoppage',
+        assemblyAffected: 'ASM-5002',
+        partAffected: 'PN-10002',
+        status: 'Under Investigation',
+      }),
+      this.createNode('Failure', {
+        failureId: 'FLR-003',
+        date: '2024-05-12',
+        severity: 'Low',
+        description: 'Cooling fan noise exceeds threshold',
+        impactLevel: 'Quality Issue',
+        assemblyAffected: 'ASM-5003',
+        partAffected: 'PN-10009',
+        status: 'Resolved',
       }),
     ];
 
@@ -1128,86 +1393,186 @@ class KuzuGraph {
         category: 'Material Defect',
         description: 'Bearing steel hardness below specification',
         contributingFactors: ['Supplier quality issue', 'Incoming inspection gap'],
+        correctiveAction: 'Updated incoming inspection criteria, issued NCR to supplier',
+        preventiveAction: 'Added hardness testing to receiving inspection',
       }),
       this.createNode('RootCause', {
         causeId: 'RC-002',
+        category: 'Process Deviation',
+        description: 'Thermal paste application insufficient due to process deviation in assembly',
+        contributingFactors: ['Operator training gap', 'Process parameter drift', 'Deviation DEV-001 allowed marginal parts'],
+        correctiveAction: 'Retrained assembly operators, adjusted thermal paste quantity',
+        preventiveAction: 'Added thermal imaging check post-assembly',
+      }),
+      this.createNode('RootCause', {
+        causeId: 'RC-003',
         category: 'Design Issue',
-        description: 'Insufficient thermal dissipation capacity',
-        contributingFactors: ['Undersized heat sink', 'High ambient temperature'],
+        description: 'Fan bearing lubrication insufficient for operating temperature range',
+        contributingFactors: ['Design validation gap', 'Operating environment hotter than spec'],
+        correctiveAction: 'Replaced with high-temperature rated fans',
+        preventiveAction: 'Updated design validation to include extended temperature testing',
       }),
     ];
 
-    // Link failures to root causes and parts
-    this.createRelationship('CAUSED_BY', failures[0].id, rootCauses[0].id, {});
-    this.createRelationship('RELATED_TO_FAILURE', parts[0].id, failures[0].id, {});
-    this.createRelationship('CAUSED_BY', failures[1].id, rootCauses[1].id, {});
-    this.createRelationship('RELATED_TO_FAILURE', parts[1].id, failures[1].id, {});
+    // Link failures to root causes
+    this.createRelationship('CAUSED_BY', failures[0].id, rootCauses[0].id, { analysisDate: '2024-04-30' });
+    this.createRelationship('CAUSED_BY', failures[1].id, rootCauses[1].id, { analysisDate: '2024-05-08' });
+    this.createRelationship('CAUSED_BY', failures[2].id, rootCauses[2].id, { analysisDate: '2024-05-14' });
+
+    // Link parts to failures (Part RELATED_TO_FAILURE -> Failure)
+    this.createRelationship('RELATED_TO_FAILURE', parts[0].id, failures[0].id, { failureMode: 'Wear' });
+    this.createRelationship('RELATED_TO_FAILURE', parts[1].id, failures[1].id, { failureMode: 'Overheat' });
+    this.createRelationship('RELATED_TO_FAILURE', parts[8].id, failures[2].id, { failureMode: 'Noise' });
+
+    // Link assemblies to failures (Assembly RELATED_TO_FAILURE -> Failure)
+    this.createRelationship('RELATED_TO_FAILURE', assemblies[0].id, failures[0].id, { discoveredDuring: 'Preventive Maintenance' });
+    this.createRelationship('RELATED_TO_FAILURE', assemblies[1].id, failures[1].id, { discoveredDuring: 'Operation' });
+    this.createRelationship('RELATED_TO_FAILURE', assemblies[2].id, failures[2].id, { discoveredDuring: 'Customer Complaint' });
 
     // ===== QUALITY INSPECTIONS =====
     const inspections = [
+      // Incoming inspections at warehouse (receiving)
       this.createNode('QualityInspection', {
         inspectionId: 'QI-001',
         date: '2024-02-01',
         inspector: 'Quality Team A',
         type: 'Incoming Inspection',
+        stage: 'Receiving',
         result: 'Pass',
         score: 98,
+        location: 'Raw Materials Storage Warehouse',
+        relatedPO: 'PO-2024-001',
       }),
       this.createNode('QualityInspection', {
         inspectionId: 'QI-002',
         date: '2024-02-15',
         inspector: 'Quality Team B',
         type: 'In-Process Inspection',
+        stage: 'Assembly',
         result: 'Pass with Deviation',
         score: 92,
+        location: 'Detroit Manufacturing Hub',
+        notes: 'Motor Controller PCB passed but with thermal paste application deviation',
       }),
       this.createNode('QualityInspection', {
         inspectionId: 'QI-003',
         date: '2024-02-28',
         inspector: 'Quality Team A',
         type: 'Final Inspection',
+        stage: 'Pre-Commissioning',
         result: 'Pass',
         score: 99,
+        location: 'Detroit Manufacturing Hub',
       }),
       this.createNode('QualityInspection', {
         inspectionId: 'QI-004',
         date: '2024-03-01',
         inspector: 'Quality Team C',
         type: 'Incoming Inspection',
+        stage: 'Receiving',
         result: 'Fail',
         score: 65,
+        location: 'Raw Materials Storage Warehouse',
+        relatedPO: 'PO-2024-003',
+      }),
+      this.createNode('QualityInspection', {
+        inspectionId: 'QI-005',
+        date: '2024-03-05',
+        inspector: 'Quality Team B',
+        type: 'Commissioning Inspection',
+        stage: 'Commissioning',
+        result: 'Pass',
+        score: 97,
+        location: 'Customer Site - Detroit',
+        notes: 'ASM-5001 commissioned at Acme Manufacturing',
+      }),
+      this.createNode('QualityInspection', {
+        inspectionId: 'QI-006',
+        date: '2024-02-16',
+        inspector: 'Quality Team A',
+        type: 'Incoming Inspection',
+        stage: 'Receiving',
+        result: 'Pass',
+        score: 95,
+        location: 'Central Distribution Center',
+        relatedPO: 'PO-2024-002',
+      }),
+      this.createNode('QualityInspection', {
+        inspectionId: 'QI-007',
+        date: '2024-03-12',
+        inspector: 'Quality Team C',
+        type: 'Commissioning Inspection',
+        stage: 'Commissioning',
+        result: 'Pass with Deviation',
+        score: 90,
+        location: 'Customer Site - Austin',
+        notes: 'ASM-5003 commissioned at TechDrive Systems with minor deviation',
       }),
     ];
 
-    // Link inspections to parts
-    this.createRelationship('QUALITY_CHECKED', parts[0].id, inspections[0].id, {});
-    this.createRelationship('QUALITY_CHECKED', parts[1].id, inspections[1].id, {});
-    this.createRelationship('QUALITY_CHECKED', assemblies[0].id, inspections[2].id, {});
-    this.createRelationship('QUALITY_CHECKED', parts[4].id, inspections[3].id, {});
+    // Link inspections to parts (receiving inspections)
+    this.createRelationship('INSPECTED_BY', parts[0].id, inspections[0].id, { inspectionPhase: 'receiving' });
+    this.createRelationship('INSPECTED_BY', parts[4].id, inspections[0].id, { inspectionPhase: 'receiving' });
+    this.createRelationship('INSPECTED_BY', parts[1].id, inspections[5].id, { inspectionPhase: 'receiving' });
+    this.createRelationship('INSPECTED_BY', parts[7].id, inspections[5].id, { inspectionPhase: 'receiving' });
+    this.createRelationship('INSPECTED_BY', parts[4].id, inspections[3].id, { inspectionPhase: 'receiving', failedInspection: true });
+
+    // Link inspections to parts (assembly inspections)
+    this.createRelationship('INSPECTED_BY', parts[1].id, inspections[1].id, { inspectionPhase: 'assembly' });
+    
+    // Link inspections to assemblies (final and commissioning)
+    this.createRelationship('INSPECTED_BY', assemblies[0].id, inspections[2].id, { inspectionPhase: 'final' });
+    this.createRelationship('INSPECTED_BY', assemblies[0].id, inspections[4].id, { inspectionPhase: 'commissioning' });
+    this.createRelationship('INSPECTED_BY', assemblies[2].id, inspections[6].id, { inspectionPhase: 'commissioning' });
 
     // ===== DEVIATIONS =====
     const deviations = [
       this.createNode('Deviation', {
         deviationId: 'DEV-001',
         date: '2024-02-15',
-        type: 'Dimensional',
-        description: 'Shaft diameter 0.02mm under nominal',
+        type: 'Process',
+        description: 'Thermal paste application quantity 15% below specification on Motor Controller PCB',
         disposition: 'Use As-Is',
         approvedBy: 'Engineering Review Board',
+        riskAssessment: 'Low risk - thermal margin still acceptable',
+        affectedPart: 'PN-10002',
+        affectedAssembly: 'ASM-5002',
+        stage: 'Assembly',
       }),
       this.createNode('Deviation', {
         deviationId: 'DEV-002',
         date: '2024-03-01',
         type: 'Material',
-        description: 'Motor windings resistance 5% above spec',
+        description: 'Motor windings resistance 5% above spec - potential overheating risk',
         disposition: 'Rejected - Return to Supplier',
         approvedBy: 'Quality Manager',
+        riskAssessment: 'High risk - could cause motor failure',
+        affectedPart: 'PN-10005',
+        stage: 'Receiving',
+      }),
+      this.createNode('Deviation', {
+        deviationId: 'DEV-003',
+        date: '2024-03-12',
+        type: 'Installation',
+        description: 'Cooling system mounting torque slightly below spec',
+        disposition: 'Use As-Is with Monitoring',
+        approvedBy: 'Field Engineering',
+        riskAssessment: 'Low risk - added vibration monitoring',
+        affectedAssembly: 'ASM-5003',
+        stage: 'Commissioning',
       }),
     ];
 
     // Link deviations to inspections
     this.createRelationship('HAS_DEVIATION', inspections[1].id, deviations[0].id, {});
     this.createRelationship('HAS_DEVIATION', inspections[3].id, deviations[1].id, {});
+    this.createRelationship('HAS_DEVIATION', inspections[6].id, deviations[2].id, {});
+
+    // Link deviations directly to parts and assemblies
+    this.createRelationship('HAS_DEVIATION', parts[1].id, deviations[0].id, { deviationType: 'process' });
+    this.createRelationship('HAS_DEVIATION', parts[4].id, deviations[1].id, { deviationType: 'material' });
+    this.createRelationship('HAS_DEVIATION', assemblies[1].id, deviations[0].id, { impactedBy: true });
+    this.createRelationship('HAS_DEVIATION', assemblies[2].id, deviations[2].id, { deviationType: 'installation' });
 
     // Create initial snapshot
     this.createSnapshot('Initial data load');
