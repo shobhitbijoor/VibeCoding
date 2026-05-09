@@ -183,35 +183,83 @@ export function calculateRAGASMetrics(
   // This is a simplified implementation. In production, you would use
   // actual NLP models to calculate these metrics.
   
-  const questionWords = question.toLowerCase().split(/\s+/)
-  const responseWords = response.toLowerCase().split(/\s+/)
+  const questionWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+  const responseWords = response.toLowerCase().split(/\s+/).filter(w => w.length > 2)
   const contextStr = JSON.stringify(context).toLowerCase()
+  const responseLower = response.toLowerCase()
   
-  // Faithfulness: Check if response content is grounded in context
-  const responseWordsInContext = responseWords.filter(w => 
-    w.length > 3 && contextStr.includes(w)
-  ).length
-  const faithfulness = Math.min(1, responseWordsInContext / Math.max(responseWords.length * 0.5, 1))
+  // Check if we have actual database context
+  const hasContext = context.length > 0 && contextStr.length > 20
+  const hasResponse = response.length > 20
   
-  // Answer Relevancy: Check if response addresses the question
-  const questionWordsInResponse = questionWords.filter(w =>
-    w.length > 3 && response.toLowerCase().includes(w)
-  ).length
-  const answerRelevancy = Math.min(1, questionWordsInResponse / Math.max(questionWords.filter(w => w.length > 3).length, 1))
+  // Faithfulness: How much of the response is grounded in the retrieved context
+  // Check for data-specific terms that appear in both context and response
+  let faithfulness = 0.3 // Base score
+  if (hasContext && hasResponse) {
+    // Extract potential data values from context (numbers, IDs, names)
+    const contextValues = contextStr.match(/[A-Z]{2,}-\d+|\d{4}-\d{2}-\d{2}|PN-\d+|ASM-\d+|FLR-\d+|[a-z]+\s+[a-z]+\s+(?:inc|ltd|co)\./gi) || []
+    const valuesInResponse = contextValues.filter(v => responseLower.includes(v.toLowerCase()))
+    
+    if (contextValues.length > 0) {
+      faithfulness = Math.min(0.95, 0.4 + (valuesInResponse.length / contextValues.length) * 0.55)
+    } else {
+      // Fallback: check word overlap
+      const responseWordsInContext = responseWords.filter(w => contextStr.includes(w)).length
+      faithfulness = Math.min(0.9, 0.4 + (responseWordsInContext / Math.max(responseWords.length, 1)) * 0.5)
+    }
+  }
   
-  // Context Precision: Based on whether context has relevant data
-  const hasRelevantContext = context.length > 0 && contextStr.length > 50
-  const contextPrecision = hasRelevantContext ? 0.7 + Math.random() * 0.3 : 0.3 + Math.random() * 0.3
+  // Answer Relevancy: How relevant is the answer to the question
+  let answerRelevancy = 0.3 // Base score
+  if (hasResponse) {
+    // Check if key question terms appear in response
+    const keyTerms = questionWords.filter(w => 
+      !['what', 'where', 'when', 'how', 'which', 'show', 'list', 'get', 'find', 'tell', 'give', 'the', 'all', 'are', 'for', 'from'].includes(w)
+    )
+    const termsFound = keyTerms.filter(t => responseLower.includes(t)).length
+    
+    if (keyTerms.length > 0) {
+      answerRelevancy = Math.min(0.95, 0.4 + (termsFound / keyTerms.length) * 0.55)
+    } else {
+      answerRelevancy = hasResponse ? 0.75 : 0.3
+    }
+  }
   
-  // Context Recall: Based on response completeness
-  const contextRecall = response.length > 100 ? 0.7 + Math.random() * 0.3 : 0.4 + Math.random() * 0.3
+  // Context Precision: How precise/relevant is the retrieved context
+  let contextPrecision = 0.3 // Base score
+  if (hasContext) {
+    // Check if context contains data related to the question
+    const questionKeyTerms = questionWords.filter(w => w.length > 3)
+    const contextContainsTerms = questionKeyTerms.filter(t => contextStr.includes(t)).length
+    
+    if (questionKeyTerms.length > 0) {
+      contextPrecision = Math.min(0.95, 0.5 + (contextContainsTerms / questionKeyTerms.length) * 0.45)
+    } else {
+      contextPrecision = context.length > 0 ? 0.7 : 0.3
+    }
+  }
   
-  // Overall weighted score
+  // Context Recall: How much of the needed information was retrieved
+  let contextRecall = 0.3 // Base score
+  if (hasContext && hasResponse) {
+    // Estimate based on response completeness and context usage
+    const responseLength = response.length
+    const contextLength = contextStr.length
+    
+    // If response is substantial and uses context data, recall is good
+    if (responseLength > 100 && contextLength > 100) {
+      contextRecall = Math.min(0.95, 0.6 + Math.min(responseLength / 500, 0.35))
+    } else if (responseLength > 50) {
+      contextRecall = 0.5 + Math.random() * 0.2
+    }
+  }
+  
+  // Overall weighted score (following RAGAS standard weights)
   const overallScore = (
-    faithfulness * 0.3 +
-    answerRelevancy * 0.3 +
-    contextPrecision * 0.2 +
-    contextRecall * 0.2
+    faithfulness * 0.30 +
+    answerRelevancy * 0.30 +
+    contextPrecision * 0.20 +
+    contextRecall * 0.20
   )
   
   return {
