@@ -175,6 +175,26 @@ export default function CopilotPage() {
     // Skip if already processed
     if (processedMessageIdsRef.current.has(messageId)) return
     
+    // Check if all tool invocations have completed
+    // Don't process until all tools have output available
+    // AI SDK v6 has TWO formats: 'dynamic-tool' and 'tool-<toolName>'
+    if (assistantMessage.parts && Array.isArray(assistantMessage.parts)) {
+      const toolParts = assistantMessage.parts.filter(p => {
+        const partAny = p as Record<string, unknown>
+        const partType = partAny.type as string
+        return partType === 'dynamic-tool' || (partType.startsWith('tool-') && partType !== 'tool-invocation')
+      })
+      const allToolsComplete = toolParts.every(p => {
+        const partAny = p as Record<string, unknown>
+        return partAny.state === 'output-available' || partAny.output !== undefined
+      })
+      
+      // If there are tool calls but not all are complete, wait for next render
+      if (toolParts.length > 0 && !allToolsComplete) {
+        return
+      }
+    }
+    
     // Find the user message that triggered this response
     let lastUserMsgIndex = -1
     for (let i = lastAssistantMsgIndex - 1; i >= 0; i--) {
@@ -187,7 +207,7 @@ export default function CopilotPage() {
     
     const userMessage = messages[lastUserMsgIndex]
     
-    // Mark as processed immediately
+    // Mark as processed immediately (after confirming tools are complete)
     processedMessageIdsRef.current.add(messageId)
     
     const userQuestion = getMessageText(userMessage)
@@ -289,60 +309,63 @@ export default function CopilotPage() {
   }
 
   // Process tool invocations from messages to extract log data
-  // AI SDK v6 uses message.parts with type 'tool-invocation'
-  // Tool input is in part.input (not args), output is in part.output (not result)
+  // AI SDK v6 has TWO tool part formats:
+  // 1. ToolUIPart: type 'tool-<TOOLNAME>' (e.g., 'tool-queryGraph') for typed tools
+  // 2. DynamicToolUIPart: type 'dynamic-tool' with toolName property
+  // Tool input is in part.input, output is in part.output
   // State 'output-available' means the tool has completed
   const extractToolLogsFromMessage = (message: typeof messages[0]) => {
     const cypherQueries: SessionLogEntry['cypherQueries'] = []
     const databaseResponses: SessionLogEntry['databaseResponses'] = []
     
-    // Check message.parts for tool-invocation entries (AI SDK v6 format)
+    // Check message.parts for tool entries (AI SDK v6 format)
     if (message.parts && Array.isArray(message.parts)) {
       message.parts.forEach((part) => {
-        if (part.type === 'tool-invocation') {
-          // AI SDK v6 tool invocation structure
-          const toolPart = part as {
-            type: 'tool-invocation'
-            toolInvocationId?: string
-            toolName: string
-            // v6 uses 'input' instead of 'args'
-            input?: Record<string, unknown>
-            args?: Record<string, unknown>
-            // v6 uses 'output' for results
-            output?: unknown
-            result?: unknown
-            state: string
+        const partAny = part as Record<string, unknown>
+        const partType = partAny.type as string
+        
+        // Check for both tool part formats:
+        // 1. Dynamic tools: type === 'dynamic-tool' with toolName property
+        // 2. Typed tools: type starts with 'tool-' (e.g., 'tool-queryGraph')
+        const isDynamicTool = partType === 'dynamic-tool'
+        const isTypedTool = partType.startsWith('tool-') && partType !== 'tool-invocation'
+        
+        if (isDynamicTool || isTypedTool) {
+          // Extract tool name based on format
+          let toolName: string
+          if (isDynamicTool) {
+            toolName = (partAny.toolName as string) || 'unknown'
+          } else {
+            // Extract from type (e.g., 'tool-queryGraph' -> 'queryGraph')
+            toolName = partType.replace('tool-', '')
           }
           
           const timestamp = new Date().toISOString()
           
-          // Get input parameters - try 'input' first (v6), then 'args' (fallback)
-          const inputParams = toolPart.input || toolPart.args || {}
+          // Get input parameters
+          const inputParams = (partAny.input as Record<string, unknown>) || {}
           
           // Generate Cypher equivalent
-          const cypherEquivalent = generateCypherEquivalent(toolPart.toolName, inputParams)
+          const cypherEquivalent = generateCypherEquivalent(toolName, inputParams)
           
           cypherQueries.push({
             timestamp,
-            toolName: toolPart.toolName,
-            queryType: (inputParams.queryType as string) || (inputParams.entityType as string) || toolPart.toolName,
+            toolName: toolName,
+            queryType: (inputParams.queryType as string) || (inputParams.entityType as string) || toolName,
             parameters: inputParams,
             cypherEquivalent,
           })
           
           // Extract response data if available
           // In v6, state is 'output-available' when complete, output contains the result
-          const hasOutput = toolPart.state === 'output-available' || 
-                           toolPart.output !== undefined ||
-                           toolPart.result !== undefined
+          const state = partAny.state as string
+          const output = partAny.output
+          const hasOutput = state === 'output-available' || output !== undefined
           
           if (hasOutput) {
-            // Get output - try 'output' first (v6), then 'result' (fallback)
-            const outputData = toolPart.output ?? toolPart.result
-            
             // Handle the result structure (our tools return { success, data })
-            const resultObj = outputData as { success?: boolean; data?: unknown; error?: string } | null
-            const data = resultObj?.data ?? outputData
+            const resultObj = output as { success?: boolean; data?: unknown; error?: string } | null
+            const data = resultObj?.data ?? output
             let recordCount = 0
             
             if (Array.isArray(data)) {
@@ -353,8 +376,8 @@ export default function CopilotPage() {
             
             databaseResponses.push({
               timestamp: new Date().toISOString(),
-              toolName: toolPart.toolName,
-              success: resultObj?.success ?? (outputData !== undefined),
+              toolName: toolName,
+              success: resultObj?.success ?? (output !== undefined),
               recordCount,
               executionTimeMs: Math.floor(Math.random() * 50) + 10,
               data: data,
@@ -375,14 +398,38 @@ export default function CopilotPage() {
       .join("")
   }
 
+  // AI SDK v6 has TWO tool part formats:
+  // 1. DynamicToolUIPart: type === 'dynamic-tool' with toolName property
+  // 2. ToolUIPart: type === 'tool-<toolName>' (e.g., 'tool-queryGraph')
+  const isToolPart = (part: Record<string, unknown>): boolean => {
+    const partType = part.type as string
+    return partType === 'dynamic-tool' || (partType.startsWith('tool-') && partType !== 'tool-invocation')
+  }
+  
+  const getToolName = (part: Record<string, unknown>): string => {
+    const partType = part.type as string
+    if (partType === 'dynamic-tool') {
+      return (part.toolName as string) || 'unknown'
+    }
+    return partType.replace('tool-', '')
+  }
+  
   const hasToolCalls = (message: typeof messages[0]): boolean => {
     if (!message.parts || !Array.isArray(message.parts)) return false
-    return message.parts.some((p) => p.type === "tool-invocation")
+    return message.parts.some((p) => isToolPart(p as Record<string, unknown>))
   }
-
+  
   const getToolCalls = (message: typeof messages[0]) => {
     if (!message.parts || !Array.isArray(message.parts)) return []
-    return message.parts.filter((p) => p.type === "tool-invocation")
+    return message.parts
+      .filter((p) => isToolPart(p as Record<string, unknown>))
+      .map(p => {
+        const partAny = p as Record<string, unknown>
+        return {
+          ...p,
+          toolName: getToolName(partAny),
+        }
+      })
   }
 
   const appliedModelInfo = AVAILABLE_MODELS.find(m => m.id === appliedModel)
