@@ -222,7 +222,7 @@ export default function CopilotPage() {
         {/* Main Chat Area */}
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Messages */}
-          <ScrollArea className="h-full flex-1 p-6">
+          <div className="flex-1 overflow-y-auto p-6">
             {messages.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-center">
                 <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -330,7 +330,7 @@ export default function CopilotPage() {
                 <div ref={messagesEndRef} />
               </div>
             )}
-          </ScrollArea>
+          </div>
 
           {/* Error Display */}
           {error && (
