@@ -89,7 +89,7 @@ export default function CopilotPage() {
   const [showLogPanel, setShowLogPanel] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const pendingLogEntryRef = useRef<Partial<SessionLogEntry> | null>(null)
+  const processedMessageIdsRef = useRef<Set<string>>(new Set())
   
   // Track a session version that increments when settings are applied
   const [sessionVersion, setSessionVersion] = useState(0)
@@ -156,62 +156,54 @@ export default function CopilotPage() {
     e.preventDefault()
     if (!input.trim() || isLoading) return
     setError(null)
-    
-    // Start a new log entry
-    pendingLogEntryRef.current = {
-      id: `entry-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      userQuestion: input.trim(),
-      cypherQueries: [],
-      databaseResponses: [],
-    }
-    
     sendMessage({ text: input })
     setInput("")
   }
 
   // Effect to process completed messages and update session log
   useEffect(() => {
-    if (status !== 'ready' || messages.length === 0) return
+    // Only process when streaming is complete
+    if (status !== 'ready' || messages.length < 2) return
     
-    const lastUserMsgIndex = messages.findLastIndex(m => m.role === 'user')
+    // Find the last complete user-assistant pair
     const lastAssistantMsgIndex = messages.findLastIndex(m => m.role === 'assistant')
+    if (lastAssistantMsgIndex < 0) return
     
-    if (lastAssistantMsgIndex > lastUserMsgIndex && pendingLogEntryRef.current) {
-      const userMessage = messages[lastUserMsgIndex]
-      const assistantMessage = messages[lastAssistantMsgIndex]
-      
-      // Debug: log the message structure to understand the format
-      console.log("[v0] Assistant message structure:", {
-        role: assistantMessage.role,
-        hasContent: !!assistantMessage.content,
-        contentType: typeof assistantMessage.content,
-        hasParts: !!(assistantMessage as Record<string, unknown>).parts,
-        partsLength: ((assistantMessage as Record<string, unknown>).parts as unknown[])?.length,
-        hasToolInvocations: !!(assistantMessage as Record<string, unknown>).toolInvocations,
-        keys: Object.keys(assistantMessage),
-      })
-      
-      const userQuestion = getMessageText(userMessage)
-      const assistantResponse = getMessageText(assistantMessage)
-      
-      // Extract tool logs from assistant message
-      const { cypherQueries, databaseResponses } = extractToolLogsFromMessage(assistantMessage)
-      
-      console.log("[v0] Extracted logs:", {
-        cypherQueriesCount: cypherQueries.length,
-        databaseResponsesCount: databaseResponses.length,
-        cypherQueries: cypherQueries.map(q => ({ tool: q.toolName, type: q.queryType })),
-      })
-      
-      // Calculate RAGAS metrics
-      const contextData = databaseResponses.map(r => r.data).filter(Boolean)
-      const ragasMetrics = calculateRAGASMetrics(userQuestion, contextData, assistantResponse)
+    const assistantMessage = messages[lastAssistantMsgIndex]
+    const messageId = assistantMessage.id
+    
+    // Skip if already processed
+    if (processedMessageIdsRef.current.has(messageId)) return
+    
+    // Find the user message that triggered this response
+    let lastUserMsgIndex = -1
+    for (let i = lastAssistantMsgIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMsgIndex = i
+        break
+      }
+    }
+    if (lastUserMsgIndex < 0) return
+    
+    const userMessage = messages[lastUserMsgIndex]
+    
+    // Mark as processed immediately
+    processedMessageIdsRef.current.add(messageId)
+    
+    const userQuestion = getMessageText(userMessage)
+    const assistantResponse = getMessageText(assistantMessage)
+    
+    // Extract tool logs from assistant message
+    const { cypherQueries, databaseResponses } = extractToolLogsFromMessage(assistantMessage)
+    
+    // Calculate RAGAS metrics
+    const contextData = databaseResponses.map(r => r.data).filter(Boolean)
+    const ragasMetrics = calculateRAGASMetrics(userQuestion, contextData, assistantResponse)
       
       // Create complete log entry
       const logEntry: SessionLogEntry = {
-        id: pendingLogEntryRef.current.id || `entry-${Date.now()}`,
-        timestamp: pendingLogEntryRef.current.timestamp || new Date().toISOString(),
+        id: `entry-${messageId}`,
+        timestamp: new Date().toISOString(),
         userQuestion,
         cypherQueries,
         databaseResponses,
@@ -241,9 +233,6 @@ export default function CopilotPage() {
           averageRAGASScore: avgRagas,
         }
       })
-      
-      // Clear pending entry
-      pendingLogEntryRef.current = null
     }
   }, [status, messages, appliedModel])
 
@@ -255,6 +244,7 @@ export default function CopilotPage() {
   const clearChat = () => {
     setMessages([])
     setError(null)
+    processedMessageIdsRef.current.clear()
     // Reset session log
     setSessionLog({
       sessionId: `session-${Date.now()}`,
@@ -300,40 +290,60 @@ export default function CopilotPage() {
   }
 
   // Process tool invocations from messages to extract log data
+  // AI SDK v6 uses message.parts with type 'tool-invocation'
+  // Tool input is in part.input (not args), output is in part.output (not result)
+  // State 'output-available' means the tool has completed
   const extractToolLogsFromMessage = (message: typeof messages[0]) => {
     const cypherQueries: SessionLogEntry['cypherQueries'] = []
     const databaseResponses: SessionLogEntry['databaseResponses'] = []
     
-    // Check message.parts for tool-invocation entries (AI SDK format)
+    // Check message.parts for tool-invocation entries (AI SDK v6 format)
     if (message.parts && Array.isArray(message.parts)) {
       message.parts.forEach((part) => {
         if (part.type === 'tool-invocation') {
-          const toolInvocation = part as {
+          // AI SDK v6 tool invocation structure
+          const toolPart = part as {
             type: 'tool-invocation'
-            toolInvocationId: string
+            toolInvocationId?: string
             toolName: string
-            args: Record<string, unknown>
-            state: string
+            // v6 uses 'input' instead of 'args'
+            input?: Record<string, unknown>
+            args?: Record<string, unknown>
+            // v6 uses 'output' for results
+            output?: unknown
             result?: unknown
+            state: string
           }
           
           const timestamp = new Date().toISOString()
           
+          // Get input parameters - try 'input' first (v6), then 'args' (fallback)
+          const inputParams = toolPart.input || toolPart.args || {}
+          
           // Generate Cypher equivalent
-          const cypherEquivalent = generateCypherEquivalent(toolInvocation.toolName, toolInvocation.args)
+          const cypherEquivalent = generateCypherEquivalent(toolPart.toolName, inputParams)
           
           cypherQueries.push({
             timestamp,
-            toolName: toolInvocation.toolName,
-            queryType: (toolInvocation.args.queryType as string) || toolInvocation.toolName,
-            parameters: toolInvocation.args,
+            toolName: toolPart.toolName,
+            queryType: (inputParams.queryType as string) || (inputParams.entityType as string) || toolPart.toolName,
+            parameters: inputParams,
             cypherEquivalent,
           })
           
           // Extract response data if available
-          if (toolInvocation.state === 'result' && toolInvocation.result) {
-            const result = toolInvocation.result as { success?: boolean; data?: unknown; error?: string }
-            const data = result.data
+          // In v6, state is 'output-available' when complete, output contains the result
+          const hasOutput = toolPart.state === 'output-available' || 
+                           toolPart.output !== undefined ||
+                           toolPart.result !== undefined
+          
+          if (hasOutput) {
+            // Get output - try 'output' first (v6), then 'result' (fallback)
+            const outputData = toolPart.output ?? toolPart.result
+            
+            // Handle the result structure (our tools return { success, data })
+            const resultObj = outputData as { success?: boolean; data?: unknown; error?: string } | null
+            const data = resultObj?.data ?? outputData
             let recordCount = 0
             
             if (Array.isArray(data)) {
@@ -344,68 +354,11 @@ export default function CopilotPage() {
             
             databaseResponses.push({
               timestamp: new Date().toISOString(),
-              toolName: toolInvocation.toolName,
-              success: result.success ?? true,
-              recordCount,
-              executionTimeMs: Math.floor(Math.random() * 50) + 10, // Estimated time since we can't track actual
-              data: result.data,
-            })
-          }
-        }
-      })
-    }
-    
-    // Also check toolInvocations array directly (older AI SDK format)
-    const msgWithToolInvocations = message as typeof message & { 
-      toolInvocations?: Array<{
-        toolName: string
-        args: Record<string, unknown>
-        result?: unknown
-        state?: string
-      }>
-    }
-    
-    if (msgWithToolInvocations.toolInvocations && Array.isArray(msgWithToolInvocations.toolInvocations)) {
-      msgWithToolInvocations.toolInvocations.forEach((toolInvocation) => {
-        const timestamp = new Date().toISOString()
-        
-        // Generate Cypher equivalent
-        const cypherEquivalent = generateCypherEquivalent(toolInvocation.toolName, toolInvocation.args)
-        
-        // Only add if not already captured from parts
-        const alreadyCaptured = cypherQueries.some(q => 
-          q.toolName === toolInvocation.toolName && 
-          JSON.stringify(q.parameters) === JSON.stringify(toolInvocation.args)
-        )
-        
-        if (!alreadyCaptured) {
-          cypherQueries.push({
-            timestamp,
-            toolName: toolInvocation.toolName,
-            queryType: (toolInvocation.args.queryType as string) || toolInvocation.toolName,
-            parameters: toolInvocation.args,
-            cypherEquivalent,
-          })
-          
-          // Extract response data if available
-          if (toolInvocation.result) {
-            const result = toolInvocation.result as { success?: boolean; data?: unknown; error?: string }
-            const data = result.data
-            let recordCount = 0
-            
-            if (Array.isArray(data)) {
-              recordCount = data.length
-            } else if (data && typeof data === 'object') {
-              recordCount = Object.keys(data).length
-            }
-            
-            databaseResponses.push({
-              timestamp: new Date().toISOString(),
-              toolName: toolInvocation.toolName,
-              success: result.success ?? true,
+              toolName: toolPart.toolName,
+              success: resultObj?.success ?? (outputData !== undefined),
               recordCount,
               executionTimeMs: Math.floor(Math.random() * 50) + 10,
-              data: result.data,
+              data: data,
             })
           }
         }
