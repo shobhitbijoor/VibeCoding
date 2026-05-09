@@ -1,0 +1,412 @@
+{
+  "schemaVersion": "1.0.0",
+  "databaseType": "Kuzu Graph Database",
+  "projectName": "Manufacturing Supply Chain Traceability",
+  "generatedAt": "2024-05-15T00:00:00Z",
+  
+  "nodeTypes": [
+    {
+      "label": "Customer",
+      "description": "End customers who purchase and use assemblies",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "industry", "type": "STRING" },
+        { "name": "tier", "type": "STRING", "enum": ["Enterprise", "Mid-Market", "SMB"] },
+        { "name": "region", "type": "STRING" },
+        { "name": "contractStartDate", "type": "DATE" },
+        { "name": "contractEndDate", "type": "DATE" },
+        { "name": "totalRevenue", "type": "DOUBLE" }
+      ]
+    },
+    {
+      "label": "CustomerLocation",
+      "description": "Physical locations where assemblies are installed",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "customerId", "type": "STRING" },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "address", "type": "STRING" },
+        { "name": "city", "type": "STRING" },
+        { "name": "state", "type": "STRING" },
+        { "name": "country", "type": "STRING" },
+        { "name": "locationType", "type": "STRING", "enum": ["HQ", "Branch", "Factory", "Warehouse"] }
+      ]
+    },
+    {
+      "label": "Assembly",
+      "description": "Manufactured assemblies/products delivered to customers",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "assemblyNumber", "type": "STRING", "required": true, "unique": true },
+        { "name": "modelNumber", "type": "STRING" },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "description", "type": "STRING" },
+        { "name": "productLine", "type": "STRING" },
+        { "name": "manufacturedDate", "type": "DATE" },
+        { "name": "warrantyEndDate", "type": "DATE" },
+        { "name": "status", "type": "STRING", "enum": ["Active", "Inactive", "Under Maintenance", "Decommissioned"] }
+      ]
+    },
+    {
+      "label": "Part",
+      "description": "Component parts that make up assemblies",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "partNumber", "type": "STRING", "required": true, "unique": true },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "description", "type": "STRING" },
+        { "name": "category", "type": "STRING" },
+        { "name": "unitCost", "type": "DOUBLE" },
+        { "name": "leadTimeDays", "type": "INT32" },
+        { "name": "lotNumber", "type": "STRING" },
+        { "name": "manufacturingDate", "type": "DATE" },
+        { "name": "expirationDate", "type": "DATE" }
+      ]
+    },
+    {
+      "label": "Warranty",
+      "description": "Warranty coverage for assemblies",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "warrantyNumber", "type": "STRING" },
+        { "name": "warrantyType", "type": "STRING" },
+        { "name": "startDate", "type": "DATE" },
+        { "name": "endDate", "type": "DATE" },
+        { "name": "coverageDetails", "type": "STRING" },
+        { "name": "maxClaims", "type": "INT32" },
+        { "name": "currentClaims", "type": "INT32" },
+        { "name": "status", "type": "STRING", "enum": ["Active", "Expired", "Voided"] }
+      ]
+    },
+    {
+      "label": "ServiceRecord",
+      "description": "Service and maintenance records for assemblies",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "serviceId", "type": "STRING" },
+        { "name": "serviceDate", "type": "DATE" },
+        { "name": "serviceType", "type": "STRING", "enum": ["Preventive Maintenance", "Corrective Maintenance", "Installation", "Inspection"] },
+        { "name": "description", "type": "STRING" },
+        { "name": "technician", "type": "STRING" },
+        { "name": "laborHours", "type": "DOUBLE" },
+        { "name": "partsCost", "type": "DOUBLE" },
+        { "name": "laborCost", "type": "DOUBLE" },
+        { "name": "totalCost", "type": "DOUBLE" },
+        { "name": "outcome", "type": "STRING" }
+      ]
+    },
+    {
+      "label": "Failure",
+      "description": "Failure incidents affecting assemblies or parts",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "failureId", "type": "STRING" },
+        { "name": "date", "type": "DATE" },
+        { "name": "severity", "type": "STRING", "enum": ["Low", "Medium", "High", "Critical"] },
+        { "name": "description", "type": "STRING" },
+        { "name": "impactLevel", "type": "STRING" },
+        { "name": "assemblyAffected", "type": "STRING" },
+        { "name": "partAffected", "type": "STRING" },
+        { "name": "status", "type": "STRING", "enum": ["Open", "Under Investigation", "Resolved", "Closed"] }
+      ]
+    },
+    {
+      "label": "RootCause",
+      "description": "Root cause analysis for failures",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "causeId", "type": "STRING" },
+        { "name": "category", "type": "STRING", "enum": ["Material Defect", "Process Deviation", "Design Issue", "Human Error", "Environmental"] },
+        { "name": "description", "type": "STRING" },
+        { "name": "contributingFactors", "type": "STRING[]" },
+        { "name": "correctiveAction", "type": "STRING" },
+        { "name": "preventiveAction", "type": "STRING" }
+      ]
+    },
+    {
+      "label": "Plant",
+      "description": "Manufacturing plants/facilities",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "plantId", "type": "STRING" },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "location", "type": "STRING" },
+        { "name": "country", "type": "STRING" },
+        { "name": "capacity", "type": "INT32" },
+        { "name": "certifications", "type": "STRING[]" }
+      ]
+    },
+    {
+      "label": "Station",
+      "description": "Work stations within plants",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "stationId", "type": "STRING" },
+        { "name": "plantId", "type": "STRING" },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "stationType", "type": "STRING", "enum": ["Assembly", "Testing", "Packaging", "Quality Control"] },
+        { "name": "operatorCount", "type": "INT32" },
+        { "name": "cycleTime", "type": "DOUBLE" }
+      ]
+    },
+    {
+      "label": "Warehouse",
+      "description": "Storage facilities for parts and finished goods",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "warehouseId", "type": "STRING" },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "location", "type": "STRING" },
+        { "name": "capacity", "type": "INT32" },
+        { "name": "currentInventory", "type": "INT32" },
+        { "name": "warehouseType", "type": "STRING", "enum": ["Raw Materials", "Finished Goods", "Distribution"] }
+      ]
+    },
+    {
+      "label": "Supplier",
+      "description": "Part suppliers and vendors",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "supplierId", "type": "STRING" },
+        { "name": "name", "type": "STRING", "required": true },
+        { "name": "country", "type": "STRING" },
+        { "name": "rating", "type": "DOUBLE" },
+        { "name": "certifications", "type": "STRING[]" },
+        { "name": "leadTimeDays", "type": "INT32" },
+        { "name": "qualityScore", "type": "DOUBLE" }
+      ]
+    },
+    {
+      "label": "SupplierPO",
+      "description": "Purchase orders to suppliers",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "poNumber", "type": "STRING", "required": true },
+        { "name": "supplierId", "type": "STRING" },
+        { "name": "orderDate", "type": "DATE" },
+        { "name": "expectedDeliveryDate", "type": "DATE" },
+        { "name": "actualDeliveryDate", "type": "DATE" },
+        { "name": "status", "type": "STRING", "enum": ["Draft", "Submitted", "Confirmed", "Shipped", "Delivered", "Closed"] },
+        { "name": "totalAmount", "type": "DOUBLE" },
+        { "name": "currency", "type": "STRING" }
+      ]
+    },
+    {
+      "label": "QualityInspection",
+      "description": "Quality inspection records",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "inspectionId", "type": "STRING" },
+        { "name": "date", "type": "DATE" },
+        { "name": "inspector", "type": "STRING" },
+        { "name": "type", "type": "STRING", "enum": ["Incoming Inspection", "In-Process Inspection", "Final Inspection", "Commissioning Inspection"] },
+        { "name": "stage", "type": "STRING", "enum": ["Receiving", "Assembly", "Final", "Commissioning"] },
+        { "name": "result", "type": "STRING", "enum": ["Pass", "Fail", "Pass with Deviation"] },
+        { "name": "score", "type": "INT32" },
+        { "name": "location", "type": "STRING" },
+        { "name": "notes", "type": "STRING" }
+      ]
+    },
+    {
+      "label": "Deviation",
+      "description": "Quality deviations and non-conformances",
+      "properties": [
+        { "name": "id", "type": "STRING", "primaryKey": true },
+        { "name": "deviationId", "type": "STRING" },
+        { "name": "date", "type": "DATE" },
+        { "name": "type", "type": "STRING", "enum": ["Dimensional", "Material", "Process", "Installation"] },
+        { "name": "description", "type": "STRING" },
+        { "name": "disposition", "type": "STRING", "enum": ["Use As-Is", "Rework", "Reject", "Return to Supplier"] },
+        { "name": "approvedBy", "type": "STRING" },
+        { "name": "riskAssessment", "type": "STRING" },
+        { "name": "affectedPart", "type": "STRING" },
+        { "name": "affectedAssembly", "type": "STRING" },
+        { "name": "stage", "type": "STRING" }
+      ]
+    }
+  ],
+
+  "relationshipTypes": [
+    {
+      "type": "COMMISSIONED_AT",
+      "description": "Assembly commissioned at a customer location",
+      "from": "Assembly",
+      "to": "CustomerLocation",
+      "properties": [
+        { "name": "commissionDate", "type": "DATE" },
+        { "name": "installedBy", "type": "STRING" }
+      ]
+    },
+    {
+      "type": "CONTAINS_PART",
+      "description": "Assembly contains a part",
+      "from": "Assembly",
+      "to": "Part",
+      "properties": [
+        { "name": "quantity", "type": "INT32" },
+        { "name": "position", "type": "STRING" }
+      ]
+    },
+    {
+      "type": "SUPPLIED_BY",
+      "description": "Part is supplied by a supplier",
+      "from": "Part",
+      "to": "Supplier",
+      "properties": [
+        { "name": "contractDate", "type": "DATE" },
+        { "name": "unitPrice", "type": "DOUBLE" }
+      ]
+    },
+    {
+      "type": "HAS_WARRANTY",
+      "description": "Assembly has a warranty",
+      "from": "Assembly",
+      "to": "Warranty"
+    },
+    {
+      "type": "HAS_SERVICE_RECORD",
+      "description": "Assembly has a service record",
+      "from": "Assembly",
+      "to": "ServiceRecord"
+    },
+    {
+      "type": "RELATED_TO_FAILURE",
+      "description": "Assembly or Part is related to a failure",
+      "from": ["Assembly", "Part"],
+      "to": "Failure",
+      "properties": [
+        { "name": "discoveredDuring", "type": "STRING" },
+        { "name": "failureMode", "type": "STRING" }
+      ]
+    },
+    {
+      "type": "CAUSED_BY",
+      "description": "Failure is caused by a root cause",
+      "from": "Failure",
+      "to": "RootCause",
+      "properties": [
+        { "name": "analysisDate", "type": "DATE" }
+      ]
+    },
+    {
+      "type": "MANUFACTURED_AT",
+      "description": "Assembly was manufactured at a plant",
+      "from": "Assembly",
+      "to": "Plant",
+      "properties": [
+        { "name": "productionLine", "type": "STRING" }
+      ]
+    },
+    {
+      "type": "PROCESSED_AT",
+      "description": "Part was processed at a station",
+      "from": "Part",
+      "to": "Station",
+      "properties": [
+        { "name": "processDate", "type": "DATE" },
+        { "name": "cycleTime", "type": "DOUBLE" }
+      ]
+    },
+    {
+      "type": "STORED_AT",
+      "description": "Part is stored at a warehouse",
+      "from": "Part",
+      "to": "Warehouse",
+      "properties": [
+        { "name": "binLocation", "type": "STRING" },
+        { "name": "quantity", "type": "INT32" }
+      ]
+    },
+    {
+      "type": "ORDERED_FROM",
+      "description": "Purchase order placed with supplier",
+      "from": "SupplierPO",
+      "to": "Supplier"
+    },
+    {
+      "type": "SOURCED_FROM",
+      "description": "Part was sourced from a purchase order",
+      "from": "Part",
+      "to": "SupplierPO",
+      "properties": [
+        { "name": "quantity", "type": "INT32" },
+        { "name": "receivedDate", "type": "DATE" }
+      ]
+    },
+    {
+      "type": "DELIVERED_TO",
+      "description": "Purchase order delivered to warehouse",
+      "from": "SupplierPO",
+      "to": "Warehouse",
+      "properties": [
+        { "name": "deliveryDate", "type": "DATE" }
+      ]
+    },
+    {
+      "type": "INSPECTED_BY",
+      "description": "Part or Assembly was inspected",
+      "from": ["Part", "Assembly"],
+      "to": "QualityInspection",
+      "properties": [
+        { "name": "inspectionPhase", "type": "STRING" }
+      ]
+    },
+    {
+      "type": "HAS_DEVIATION",
+      "description": "Inspection, Part, or Assembly has a deviation",
+      "from": ["QualityInspection", "Part", "Assembly"],
+      "to": "Deviation",
+      "properties": [
+        { "name": "deviationType", "type": "STRING" },
+        { "name": "impactedBy", "type": "BOOLEAN" }
+      ]
+    },
+    {
+      "type": "PART_OF_LOT",
+      "description": "Parts belonging to the same lot",
+      "from": "Part",
+      "to": "Part",
+      "properties": [
+        { "name": "lotNumber", "type": "STRING" }
+      ]
+    }
+  ],
+
+  "statistics": {
+    "nodeTypeCounts": {
+      "Customer": 5,
+      "CustomerLocation": 8,
+      "Assembly": 4,
+      "Part": 10,
+      "Warranty": 4,
+      "ServiceRecord": 3,
+      "Failure": 3,
+      "RootCause": 3,
+      "Plant": 2,
+      "Station": 4,
+      "Warehouse": 2,
+      "Supplier": 5,
+      "SupplierPO": 6,
+      "QualityInspection": 7,
+      "Deviation": 3
+    },
+    "relationshipTypeCounts": {
+      "COMMISSIONED_AT": 8,
+      "CONTAINS_PART": 40,
+      "SUPPLIED_BY": 10,
+      "HAS_WARRANTY": 4,
+      "HAS_SERVICE_RECORD": 3,
+      "RELATED_TO_FAILURE": 6,
+      "CAUSED_BY": 3,
+      "MANUFACTURED_AT": 4,
+      "PROCESSED_AT": 8,
+      "STORED_AT": 10,
+      "ORDERED_FROM": 6,
+      "SOURCED_FROM": 10,
+      "DELIVERED_TO": 5,
+      "INSPECTED_BY": 12,
+      "HAS_DEVIATION": 7
+    }
+  }
+}
