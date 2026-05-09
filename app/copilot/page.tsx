@@ -34,10 +34,10 @@ const AVAILABLE_MODELS = [
   { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
   { id: "anthropic/claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
   { id: "anthropic/claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
-  { id: "google/gemini-2.5-flash-preview-05-20", name: "Gemini 2.5 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "google/gemini-2.5-pro-preview-05-06", name: "Gemini 2.5 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "google/gemini-1.5-flash", name: "Gemini 1.5 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "google/gemini-1.5-pro", name: "Gemini 1.5 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3-flash", name: "Gemini 3 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
 ]
 
 // Example questions for users
