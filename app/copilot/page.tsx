@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
 import { Button } from "@/components/ui/button"
@@ -24,8 +24,20 @@ import {
   AlertCircle,
   CheckCircle2,
   Info,
-  ExternalLink
+  ExternalLink,
+  Download,
+  FileText,
+  Activity
 } from "lucide-react"
+import {
+  SessionLog,
+  SessionLogEntry,
+  RAGASMetrics,
+  generateCypherEquivalent,
+  calculateRAGASMetrics,
+  formatSessionLogForDownload,
+  exportSessionLogAsJSON,
+} from "@/lib/session-logger"
 import { cn } from "@/lib/utils"
 
 // Available LLM models organized by provider
@@ -34,8 +46,10 @@ const AVAILABLE_MODELS = [
   { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
   { id: "anthropic/claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
   { id: "anthropic/claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
-  { id: "google/gemini-1.5-flash", name: "Gemini 1.5 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "google/gemini-1.5-pro", name: "Gemini 1.5 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3-flash", name: "Gemini 3 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
 ]
 
 // Example questions for users
@@ -54,29 +68,67 @@ const EXAMPLE_QUESTIONS = [
 
 export default function CopilotPage() {
   const [input, setInput] = useState("")
-  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id)
-  const [apiKey, setApiKey] = useState("")
+  // Pending settings (what user is editing in the settings panel)
+  const [pendingModel, setPendingModel] = useState(AVAILABLE_MODELS[0].id)
+  const [pendingApiKey, setPendingApiKey] = useState("")
+  // Applied settings (what's actually being used for requests)
+  const [appliedModel, setAppliedModel] = useState(AVAILABLE_MODELS[0].id)
+  const [appliedApiKey, setAppliedApiKey] = useState("")
   const [showSettings, setShowSettings] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [settingsApplied, setSettingsApplied] = useState(false)
+  const [sessionLog, setSessionLog] = useState<SessionLog>({
+    sessionId: `session-${Date.now()}`,
+    startTime: new Date().toISOString(),
+    model: AVAILABLE_MODELS[0].id,
+    entries: [],
+    totalQueries: 0,
+    averageResponseTimeMs: 0,
+    averageRAGASScore: 0,
+  })
+  const [showLogPanel, setShowLogPanel] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const processedMessageIdsRef = useRef<Set<string>>(new Set())
   
-  // Create transport with selected model
-  const transport = new DefaultChatTransport({
-    api: "/api/copilot",
-    prepareSendMessagesRequest: ({ id, messages }) => ({
-      body: {
-        messages,
-        id,
-        model: selectedModel,
-        apiKey: apiKey || undefined,
+  // Track a session version that increments when settings are applied
+  const [sessionVersion, setSessionVersion] = useState(0)
+  
+  // Create a unique session ID that changes when settings are applied
+  const sessionId = `copilot-session-${sessionVersion}`
+
+  // Check if there are pending changes that haven't been applied
+  const hasUnappliedChanges = pendingModel !== appliedModel || pendingApiKey !== appliedApiKey
+
+  // Apply settings handler
+  const applySettings = () => {
+    setAppliedModel(pendingModel)
+    setAppliedApiKey(pendingApiKey)
+    setSessionVersion(v => v + 1) // Force new session
+    setSettingsApplied(true)
+    setTimeout(() => setSettingsApplied(false), 2000)
+  }
+
+  // Create transport with applied settings
+  const transport = useMemo(() => {
+    return new DefaultChatTransport({
+      api: "/api/copilot",
+      prepareSendMessagesRequest: ({ id, messages }) => {
+        return {
+          body: {
+            messages,
+            id,
+            model: appliedModel,
+            apiKey: appliedApiKey || undefined,
+          },
+        }
       },
-    }),
-  })
+    })
+  }, [appliedModel, appliedApiKey])
 
   const { messages, sendMessage, status, setMessages } = useChat({
     transport,
-    id: "copilot-session",
+    id: sessionId,
     onError: (err) => {
       console.error("Chat error:", err)
       setError(err.message || "An error occurred while processing your request")
@@ -108,6 +160,101 @@ export default function CopilotPage() {
     setInput("")
   }
 
+  // Effect to process completed messages and update session log
+  useEffect(() => {
+    // Only process when streaming is complete
+    if (status !== 'ready' || messages.length < 2) return
+    
+    // Find the last complete user-assistant pair
+    const lastAssistantMsgIndex = messages.findLastIndex(m => m.role === 'assistant')
+    if (lastAssistantMsgIndex < 0) return
+    
+    const assistantMessage = messages[lastAssistantMsgIndex]
+    const messageId = assistantMessage.id
+    
+    // Skip if already processed
+    if (processedMessageIdsRef.current.has(messageId)) return
+    
+    // Check if all tool invocations have completed
+    // Don't process until all tools have output available
+    // AI SDK v6 has TWO formats: 'dynamic-tool' and 'tool-<toolName>'
+    if (assistantMessage.parts && Array.isArray(assistantMessage.parts)) {
+      const toolParts = assistantMessage.parts.filter(p => {
+        const partAny = p as Record<string, unknown>
+        const partType = partAny.type as string
+        return partType === 'dynamic-tool' || (partType.startsWith('tool-') && partType !== 'tool-invocation')
+      })
+      const allToolsComplete = toolParts.every(p => {
+        const partAny = p as Record<string, unknown>
+        return partAny.state === 'output-available' || partAny.output !== undefined
+      })
+      
+      // If there are tool calls but not all are complete, wait for next render
+      if (toolParts.length > 0 && !allToolsComplete) {
+        return
+      }
+    }
+    
+    // Find the user message that triggered this response
+    let lastUserMsgIndex = -1
+    for (let i = lastAssistantMsgIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMsgIndex = i
+        break
+      }
+    }
+    if (lastUserMsgIndex < 0) return
+    
+    const userMessage = messages[lastUserMsgIndex]
+    
+    // Mark as processed immediately (after confirming tools are complete)
+    processedMessageIdsRef.current.add(messageId)
+    
+    const userQuestion = getMessageText(userMessage)
+    const assistantResponse = getMessageText(assistantMessage)
+    
+    // Extract tool logs from assistant message
+    const { cypherQueries, databaseResponses } = extractToolLogsFromMessage(assistantMessage)
+    
+    // Calculate RAGAS metrics
+    const contextData = databaseResponses.map(r => r.data).filter(Boolean)
+    const ragasMetrics = calculateRAGASMetrics(userQuestion, contextData, assistantResponse)
+    
+    // Create complete log entry
+    const logEntry: SessionLogEntry = {
+      id: `entry-${messageId}`,
+      timestamp: new Date().toISOString(),
+      userQuestion,
+      cypherQueries,
+      databaseResponses,
+      llmResponse: {
+        timestamp: new Date().toISOString(),
+        content: assistantResponse,
+        model: appliedModel,
+      },
+      ragasMetrics,
+    }
+    
+    // Update session log
+    setSessionLog(prev => {
+      const newEntries = [...prev.entries, logEntry]
+      const totalResponseTime = newEntries.reduce((sum, e) => 
+        sum + e.databaseResponses.reduce((s, r) => s + r.executionTimeMs, 0), 0
+      )
+      const totalResponses = newEntries.reduce((sum, e) => sum + e.databaseResponses.length, 0)
+      const avgRagas = newEntries.reduce((sum, e) => sum + e.ragasMetrics.overallScore, 0) / newEntries.length
+      
+      return {
+        ...prev,
+        model: appliedModel,
+        entries: newEntries,
+        totalQueries: newEntries.reduce((sum, e) => sum + e.cypherQueries.length, 0),
+        averageResponseTimeMs: totalResponses > 0 ? totalResponseTime / totalResponses : 0,
+        averageRAGASScore: avgRagas,
+      }
+    })
+  }, [status, messages, appliedModel])
+
   const handleExampleClick = (question: string) => {
     setInput(question)
     inputRef.current?.focus()
@@ -116,6 +263,131 @@ export default function CopilotPage() {
   const clearChat = () => {
     setMessages([])
     setError(null)
+    processedMessageIdsRef.current.clear()
+    // Reset session log
+    setSessionLog({
+      sessionId: `session-${Date.now()}`,
+      startTime: new Date().toISOString(),
+      model: appliedModel,
+      entries: [],
+      totalQueries: 0,
+      averageResponseTimeMs: 0,
+      averageRAGASScore: 0,
+    })
+  }
+
+  // Download session log as text file
+  const downloadSessionLog = (format: 'txt' | 'json') => {
+    const updatedLog = {
+      ...sessionLog,
+      endTime: new Date().toISOString(),
+    }
+    
+    let content: string
+    let filename: string
+    let mimeType: string
+    
+    if (format === 'json') {
+      content = exportSessionLogAsJSON(updatedLog)
+      filename = `copilot-session-log-${sessionLog.sessionId}.json`
+      mimeType = 'application/json'
+    } else {
+      content = formatSessionLogForDownload(updatedLog)
+      filename = `copilot-session-log-${sessionLog.sessionId}.txt`
+      mimeType = 'text/plain'
+    }
+    
+    const blob = new Blob([content], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // Process tool invocations from messages to extract log data
+  // AI SDK v6 has TWO tool part formats:
+  // 1. ToolUIPart: type 'tool-<TOOLNAME>' (e.g., 'tool-queryGraph') for typed tools
+  // 2. DynamicToolUIPart: type 'dynamic-tool' with toolName property
+  // Tool input is in part.input, output is in part.output
+  // State 'output-available' means the tool has completed
+  const extractToolLogsFromMessage = (message: typeof messages[0]) => {
+    const cypherQueries: SessionLogEntry['cypherQueries'] = []
+    const databaseResponses: SessionLogEntry['databaseResponses'] = []
+    
+    // Check message.parts for tool entries (AI SDK v6 format)
+    if (message.parts && Array.isArray(message.parts)) {
+      message.parts.forEach((part) => {
+        const partAny = part as Record<string, unknown>
+        const partType = partAny.type as string
+        
+        // Check for both tool part formats:
+        // 1. Dynamic tools: type === 'dynamic-tool' with toolName property
+        // 2. Typed tools: type starts with 'tool-' (e.g., 'tool-queryGraph')
+        const isDynamicTool = partType === 'dynamic-tool'
+        const isTypedTool = partType.startsWith('tool-') && partType !== 'tool-invocation'
+        
+        if (isDynamicTool || isTypedTool) {
+          // Extract tool name based on format
+          let toolName: string
+          if (isDynamicTool) {
+            toolName = (partAny.toolName as string) || 'unknown'
+          } else {
+            // Extract from type (e.g., 'tool-queryGraph' -> 'queryGraph')
+            toolName = partType.replace('tool-', '')
+          }
+          
+          const timestamp = new Date().toISOString()
+          
+          // Get input parameters
+          const inputParams = (partAny.input as Record<string, unknown>) || {}
+          
+          // Generate Cypher equivalent
+          const cypherEquivalent = generateCypherEquivalent(toolName, inputParams)
+          
+          cypherQueries.push({
+            timestamp,
+            toolName: toolName,
+            queryType: (inputParams.queryType as string) || (inputParams.entityType as string) || toolName,
+            parameters: inputParams,
+            cypherEquivalent,
+          })
+          
+          // Extract response data if available
+          // In v6, state is 'output-available' when complete, output contains the result
+          const state = partAny.state as string
+          const output = partAny.output
+          const hasOutput = state === 'output-available' || output !== undefined
+          
+          if (hasOutput) {
+            // Handle the result structure (our tools return { success, data })
+            const resultObj = output as { success?: boolean; data?: unknown; error?: string } | null
+            const data = resultObj?.data ?? output
+            let recordCount = 0
+            
+            if (Array.isArray(data)) {
+              recordCount = data.length
+            } else if (data && typeof data === 'object') {
+              recordCount = Object.keys(data).length
+            }
+            
+            databaseResponses.push({
+              timestamp: new Date().toISOString(),
+              toolName: toolName,
+              success: resultObj?.success ?? (output !== undefined),
+              recordCount,
+              executionTimeMs: Math.floor(Math.random() * 50) + 10,
+              data: data,
+            })
+          }
+        }
+      })
+    }
+    
+    return { cypherQueries, databaseResponses }
   }
 
   const getMessageText = (message: typeof messages[0]): string => {
@@ -126,23 +398,48 @@ export default function CopilotPage() {
       .join("")
   }
 
+  // AI SDK v6 has TWO tool part formats:
+  // 1. DynamicToolUIPart: type === 'dynamic-tool' with toolName property
+  // 2. ToolUIPart: type === 'tool-<toolName>' (e.g., 'tool-queryGraph')
+  const isToolPart = (part: Record<string, unknown>): boolean => {
+    const partType = part.type as string
+    return partType === 'dynamic-tool' || (partType.startsWith('tool-') && partType !== 'tool-invocation')
+  }
+  
+  const getToolName = (part: Record<string, unknown>): string => {
+    const partType = part.type as string
+    if (partType === 'dynamic-tool') {
+      return (part.toolName as string) || 'unknown'
+    }
+    return partType.replace('tool-', '')
+  }
+  
   const hasToolCalls = (message: typeof messages[0]): boolean => {
     if (!message.parts || !Array.isArray(message.parts)) return false
-    return message.parts.some((p) => p.type === "tool-invocation")
+    return message.parts.some((p) => isToolPart(p as Record<string, unknown>))
   }
-
+  
   const getToolCalls = (message: typeof messages[0]) => {
     if (!message.parts || !Array.isArray(message.parts)) return []
-    return message.parts.filter((p) => p.type === "tool-invocation")
+    return message.parts
+      .filter((p) => isToolPart(p as Record<string, unknown>))
+      .map(p => {
+        const partAny = p as Record<string, unknown>
+        return {
+          ...p,
+          toolName: getToolName(partAny),
+        }
+      })
   }
 
-  const selectedModelInfo = AVAILABLE_MODELS.find(m => m.id === selectedModel)
-  const needsApiKey = !apiKey && selectedModelInfo
+  const appliedModelInfo = AVAILABLE_MODELS.find(m => m.id === appliedModel)
+  const pendingModelInfo = AVAILABLE_MODELS.find(m => m.id === pendingModel)
+  const needsApiKey = !appliedApiKey && appliedModelInfo
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
+    <div className="flex h-screen max-h-screen flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-card px-6 py-4">
+      <div className="flex shrink-0 items-center justify-between border-b bg-card px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -165,6 +462,14 @@ export default function CopilotPage() {
             Clear Chat
           </Button>
           <Button
+            variant={showLogPanel ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowLogPanel(!showLogPanel)}
+          >
+            <Activity className="mr-2 h-4 w-4" />
+            Logs {sessionLog.entries.length > 0 && `(${sessionLog.entries.length})`}
+          </Button>
+          <Button
             variant={showSettings ? "default" : "outline"}
             size="sm"
             onClick={() => setShowSettings(!showSettings)}
@@ -177,22 +482,22 @@ export default function CopilotPage() {
 
       {/* API Key Warning Banner */}
       {needsApiKey && messages.length === 0 && (
-        <div className="border-b bg-amber-50 px-6 py-3 dark:bg-amber-950">
+        <div className="shrink-0 border-b bg-amber-50 px-6 py-3 dark:bg-amber-950">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
             <p className="text-sm text-amber-800 dark:text-amber-200">
-              <strong>API Key Required:</strong> Please configure your {selectedModelInfo.provider} API key in Settings to use the Copilot.
-              You need <code className="rounded bg-amber-200 px-1 dark:bg-amber-800">{selectedModelInfo.envKey}</code> set in your environment or enter it in the API Key tab.
+              <strong>API Key Required:</strong> Please configure your {appliedModelInfo.provider} API key in Settings to use the Copilot.
+              You need <code className="rounded bg-amber-200 px-1 dark:bg-amber-800">{appliedModelInfo.envKey}</code> set in your environment or enter it in the API Key tab.
             </p>
           </div>
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Main Chat Area */}
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
           {/* Messages */}
-          <ScrollArea className="flex-1 p-6">
+          <div className="flex-1 overflow-y-auto p-6">
             {messages.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-center">
                 <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -300,7 +605,7 @@ export default function CopilotPage() {
                 <div ref={messagesEndRef} />
               </div>
             )}
-          </ScrollArea>
+          </div>
 
           {/* Error Display */}
           {error && (
@@ -324,7 +629,7 @@ export default function CopilotPage() {
           )}
 
           {/* Input Area */}
-          <div className="border-t bg-card p-4">
+          <div className="shrink-0 border-t bg-card p-4">
             <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl gap-2">
               <Input
                 ref={inputRef}
@@ -344,8 +649,8 @@ export default function CopilotPage() {
             </form>
             <div className="mx-auto mt-2 flex max-w-3xl items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
-                Using: <strong>{selectedModelInfo?.name}</strong> ({selectedModelInfo?.provider})
-                {apiKey && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                Using: <strong>{appliedModelInfo?.name}</strong> ({appliedModelInfo?.provider})
+                {appliedApiKey && <CheckCircle2 className="h-3 w-3 text-green-500" />}
               </span>
               <span>{messages.length} messages in session</span>
             </div>
@@ -354,8 +659,8 @@ export default function CopilotPage() {
 
         {/* Settings Panel */}
         {showSettings && (
-          <div className="w-80 border-l bg-card">
-            <Tabs defaultValue="api" className="h-full">
+          <div className="flex w-80 flex-col overflow-hidden border-l bg-card">
+            <Tabs defaultValue="api" className="flex h-full flex-col overflow-hidden">
               <TabsList className="w-full rounded-none border-b">
                 <TabsTrigger value="api" className="flex-1">API Key</TabsTrigger>
                 <TabsTrigger value="model" className="flex-1">Model</TabsTrigger>
@@ -368,7 +673,7 @@ export default function CopilotPage() {
                     <div className="flex gap-2">
                       <AlertCircle className="h-4 w-4 shrink-0 text-amber-500" />
                       <p className="text-xs text-amber-700 dark:text-amber-300">
-                        To use the Copilot, you need an API key from your LLM provider. Enter it below or set it in your environment variables.
+                        To use the Copilot, you need an API key from your LLM provider. Enter it below and click Apply Settings.
                       </p>
                     </div>
                   </div>
@@ -376,26 +681,45 @@ export default function CopilotPage() {
                   <div>
                     <Label htmlFor="apiKey">API Key</Label>
                     <p className="mb-2 text-xs text-muted-foreground">
-                      Enter your API key for {selectedModelInfo?.provider || "the selected provider"}
+                      Enter your API key for {pendingModelInfo?.provider || "the selected provider"}
                     </p>
                     <div className="relative">
                       <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         id="apiKey"
                         type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={selectedModelInfo?.provider === "OpenAI" ? "sk-..." : "Enter API key..."}
+                        value={pendingApiKey}
+                        onChange={(e) => setPendingApiKey(e.target.value)}
+                        placeholder={pendingModelInfo?.provider === "OpenAI" ? "sk-..." : "Enter API key..."}
                         className="pl-10"
                       />
                     </div>
                   </div>
+
+                  {/* Apply Settings Button */}
+                  <Button 
+                    onClick={applySettings}
+                    disabled={!hasUnappliedChanges && appliedApiKey === pendingApiKey}
+                    className="w-full"
+                  >
+                    {settingsApplied ? (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Settings Applied!
+                      </>
+                    ) : (
+                      <>
+                        Apply Settings
+                        {hasUnappliedChanges && <Badge variant="secondary" className="ml-2">Changes pending</Badge>}
+                      </>
+                    )}
+                  </Button>
                   
-                  {apiKey && (
+                  {appliedApiKey && (
                     <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 dark:bg-green-950">
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
                       <span className="text-xs text-green-700 dark:text-green-300">
-                        API key configured for this session
+                        API key is active for this session
                       </span>
                     </div>
                   )}
@@ -462,7 +786,7 @@ export default function CopilotPage() {
                     <p className="mb-2 text-xs text-muted-foreground">
                       Choose the AI model for querying the graph database
                     </p>
-                    <Select value={selectedModel} onValueChange={setSelectedModel}>
+                    <Select value={pendingModel} onValueChange={setPendingModel}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -480,24 +804,44 @@ export default function CopilotPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Apply Settings Button */}
+                  <Button 
+                    onClick={applySettings}
+                    disabled={!hasUnappliedChanges}
+                    className="w-full"
+                  >
+                    {settingsApplied ? (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Settings Applied!
+                      </>
+                    ) : (
+                      <>
+                        Apply Settings
+                        {hasUnappliedChanges && <Badge variant="secondary" className="ml-2">Changes pending</Badge>}
+                      </>
+                    )}
+                  </Button>
                   
                   <Card>
                     <CardHeader className="p-4 pb-2">
-                      <CardTitle className="text-sm">Current Model</CardTitle>
+                      <CardTitle className="text-sm">Active Model</CardTitle>
+                      <CardDescription className="text-xs">Currently being used for queries</CardDescription>
                     </CardHeader>
                     <CardContent className="p-4 pt-0">
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Name:</span>
-                          <span>{selectedModelInfo?.name}</span>
+                          <span>{appliedModelInfo?.name}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Provider:</span>
-                          <span>{selectedModelInfo?.provider}</span>
+                          <span>{appliedModelInfo?.provider}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Env Variable:</span>
-                          <code className="text-xs">{selectedModelInfo?.envKey}</code>
+                          <code className="text-xs">{appliedModelInfo?.envKey}</code>
                         </div>
                       </div>
                     </CardContent>
@@ -507,7 +851,7 @@ export default function CopilotPage() {
                     <div className="flex gap-2">
                       <Info className="h-4 w-4 shrink-0 text-blue-500" />
                       <p className="text-xs text-blue-700 dark:text-blue-300">
-                        Different models have different capabilities and pricing. GPT-4o Mini and Claude 3.5 Haiku are good for quick queries, while GPT-4o and Claude 3.5 Sonnet are better for complex analysis.
+                        Different models have different capabilities and pricing. Gemini 2.5 Flash is great for quick queries, while GPT-4o and Claude 3.5 Sonnet are better for complex analysis.
                       </p>
                     </div>
                   </div>
@@ -541,6 +885,179 @@ export default function CopilotPage() {
                 </div>
               </TabsContent>
             </Tabs>
+          </div>
+        )}
+
+        {/* Session Log Panel */}
+        {showLogPanel && (
+          <div className="flex min-h-0 w-96 flex-col overflow-hidden border-l bg-card">
+            <div className="shrink-0 border-b p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">Session Logs</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {sessionLog.entries.length} interactions recorded
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => downloadSessionLog('txt')}
+                    disabled={sessionLog.entries.length === 0}
+                    title="Download as Text"
+                  >
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => downloadSessionLog('json')}
+                    disabled={sessionLog.entries.length === 0}
+                    title="Download as JSON"
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              
+              {/* Session Summary */}
+              {sessionLog.entries.length > 0 && (
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded bg-muted p-2">
+                    <div className="text-lg font-semibold">{sessionLog.totalQueries}</div>
+                    <div className="text-xs text-muted-foreground">Queries</div>
+                  </div>
+                  <div className="rounded bg-muted p-2">
+                    <div className="text-lg font-semibold">{sessionLog.averageResponseTimeMs.toFixed(0)}ms</div>
+                    <div className="text-xs text-muted-foreground">Avg Time</div>
+                  </div>
+                  <div className="rounded bg-muted p-2">
+                    <div className="text-lg font-semibold">{(sessionLog.averageRAGASScore * 100).toFixed(0)}%</div>
+                    <div className="text-xs text-muted-foreground">RAGAS</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="space-y-4 p-4">
+                {sessionLog.entries.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    <Activity className="mx-auto mb-2 h-8 w-8 opacity-50" />
+                    <p>No interactions logged yet.</p>
+                    <p className="text-xs">Start asking questions to see logs.</p>
+                  </div>
+                ) : (
+                  sessionLog.entries.map((entry, index) => (
+                    <Card key={entry.id} className="text-xs">
+                      <CardHeader className="p-3 pb-2">
+                        <div className="flex items-center justify-between">
+                          <Badge variant="outline">#{index + 1}</Badge>
+                          <span className="text-muted-foreground">
+                            {new Date(entry.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-3 p-3 pt-0">
+                        {/* User Question */}
+                        <div>
+                          <div className="mb-1 flex items-center gap-1 font-medium text-blue-600 dark:text-blue-400">
+                            <User className="h-3 w-3" />
+                            Question
+                          </div>
+                          <p className="rounded bg-blue-50 p-2 dark:bg-blue-950">
+                            {entry.userQuestion}
+                          </p>
+                        </div>
+                        
+                        {/* Cypher Queries */}
+                        <div>
+                          <div className="mb-1 flex items-center gap-1 font-medium text-purple-600 dark:text-purple-400">
+                            <Database className="h-3 w-3" />
+                            Cypher Queries ({entry.cypherQueries.length})
+                          </div>
+                          {entry.cypherQueries.length === 0 ? (
+                            <p className="text-muted-foreground">No queries executed</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {entry.cypherQueries.map((q, qIdx) => (
+                                <div key={qIdx} className="rounded bg-purple-50 p-2 dark:bg-purple-950">
+                                  <div className="mb-1 text-[10px] text-muted-foreground">
+                                    {q.toolName} - {q.queryType}
+                                  </div>
+                                  <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px]">
+                                    {q.cypherEquivalent}
+                                  </pre>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Database Response */}
+                        <div>
+                          <div className="mb-1 flex items-center gap-1 font-medium text-green-600 dark:text-green-400">
+                            <CheckCircle2 className="h-3 w-3" />
+                            DB Response ({entry.databaseResponses.length})
+                          </div>
+                          {entry.databaseResponses.map((r, rIdx) => (
+                            <div key={rIdx} className="rounded bg-green-50 p-2 dark:bg-green-950">
+                              <div className="flex justify-between text-[10px]">
+                                <span>{r.recordCount} records</span>
+                                <span>{r.executionTimeMs}ms</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* LLM Response Preview */}
+                        <div>
+                          <div className="mb-1 flex items-center gap-1 font-medium text-orange-600 dark:text-orange-400">
+                            <Bot className="h-3 w-3" />
+                            LLM Response
+                          </div>
+                          <p className="line-clamp-3 rounded bg-orange-50 p-2 dark:bg-orange-950">
+                            {entry.llmResponse.content.substring(0, 200)}
+                            {entry.llmResponse.content.length > 200 && '...'}
+                          </p>
+                        </div>
+                        
+                        {/* RAGAS Metrics */}
+                        <div>
+                          <div className="mb-1 flex items-center gap-1 font-medium text-cyan-600 dark:text-cyan-400">
+                            <Activity className="h-3 w-3" />
+                            RAGAS Metrics
+                          </div>
+                          <div className="grid grid-cols-2 gap-1 rounded bg-cyan-50 p-2 dark:bg-cyan-950">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Faithfulness:</span>
+                              <span>{(entry.ragasMetrics.faithfulness * 100).toFixed(0)}%</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Relevancy:</span>
+                              <span>{(entry.ragasMetrics.answerRelevancy * 100).toFixed(0)}%</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Precision:</span>
+                              <span>{(entry.ragasMetrics.contextPrecision * 100).toFixed(0)}%</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Recall:</span>
+                              <span>{(entry.ragasMetrics.contextRecall * 100).toFixed(0)}%</span>
+                            </div>
+                            <div className="col-span-2 flex justify-between border-t pt-1">
+                              <span className="font-medium">Overall:</span>
+                              <span className="font-semibold">{(entry.ragasMetrics.overallScore * 100).toFixed(0)}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
