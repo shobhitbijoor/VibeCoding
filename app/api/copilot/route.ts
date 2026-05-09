@@ -172,6 +172,81 @@ const graphTools = {
       }
     },
   }),
+  
+  searchGraph: tool({
+    description: 'Search the graph database for nodes matching a search term. Use this to find entities by name before querying for specific details.',
+    inputSchema: z.object({
+      searchTerm: z.string().describe('The search term to find nodes by name or property value'),
+    }),
+    execute: async ({ searchTerm }) => {
+      try {
+        const results = graphDb.searchNodes(searchTerm)
+        return { 
+          success: true, 
+          data: results.map(n => ({
+            id: n.id,
+            type: n.label,
+            properties: n.properties
+          }))
+        }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
+  
+  getAllEntities: tool({
+    description: 'Get all entities of a specific type from the database. Use this to list all customers, suppliers, assemblies, parts, etc.',
+    inputSchema: z.object({
+      entityType: z.enum(['customers', 'suppliers', 'assemblies', 'parts', 'plants', 'stations', 'warehouses', 'failures', 'service_records']).describe('The type of entities to retrieve'),
+    }),
+    execute: async ({ entityType }) => {
+      try {
+        let data;
+        switch (entityType) {
+          case 'customers':
+            data = graphDb.getAllCustomers();
+            break;
+          case 'suppliers':
+            data = graphDb.getAllSuppliers();
+            break;
+          case 'assemblies':
+            data = graphDb.getAllAssemblies();
+            break;
+          case 'parts':
+            data = graphDb.getAllParts();
+            break;
+          case 'plants':
+            data = graphDb.getNodesByLabel('Plant');
+            break;
+          case 'stations':
+            data = graphDb.getNodesByLabel('Station');
+            break;
+          case 'warehouses':
+            data = graphDb.getNodesByLabel('Warehouse');
+            break;
+          case 'failures':
+            data = graphDb.getNodesByLabel('Failure');
+            break;
+          case 'service_records':
+            data = graphDb.getNodesByLabel('ServiceRecord');
+            break;
+          default:
+            return { success: false, error: 'Unknown entity type' };
+        }
+        return { 
+          success: true, 
+          data: data.map(n => ({
+            id: n.id,
+            type: n.label,
+            properties: n.properties
+          }))
+        };
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  }),
 }
 
 // Helper function to get the model based on provider and API key
@@ -230,16 +305,37 @@ export async function POST(req: Request) {
       
 ${GRAPH_SCHEMA}
 
-When users ask questions about the data, use the queryGraph tool to fetch relevant information.
-Always explain your findings in a clear, human-readable way.
-If you need to make multiple queries to answer a question, do so step by step.
-When presenting data, format it nicely using markdown tables or lists as appropriate.
+## How to Query the Database
 
-Important guidelines:
-- For questions about customers, start with 'all_customers' to see available customers
-- For assembly-related questions, you may need the assembly ID first
-- For supplier questions, check 'statistics' first to see available suppliers
-- Always provide context about what you found and what it means`,
+You have access to three tools:
+
+1. **getAllEntities** - Use this to list all entities of a type (customers, suppliers, assemblies, parts, etc.)
+2. **searchGraph** - Use this to search for entities by name or property value
+3. **queryGraph** - Use this to query relationships and get detailed information
+
+### Query Strategy:
+
+1. **When users ask about a specific entity by name** (e.g., "parts from Precision Parts Inc"):
+   - First use searchGraph with the name to find the entity and get its ID
+   - Then use queryGraph with the ID to get related data
+   - You can also use queryGraph directly - it supports searching by name!
+
+2. **When users want to list all entities**:
+   - Use getAllEntities with the entity type
+
+3. **For relationship queries** (e.g., "service history for assembly X"):
+   - The queryGraph tool accepts both IDs AND names/serial numbers
+   - Just pass the name or serial number as the ID parameter and it will find the match
+
+### Important Notes:
+- Assembly numbers look like "ASM-5001", "ASM-5002", etc.
+- Part numbers look like "PN-10001", "PN-10002", etc.
+- Supplier names: "Precision Parts Inc.", "Global Components Ltd.", "ElectroComponents Ltd.", "PolymerTech Inc.", "CastMaster Foundry"
+- The queryGraph tool will try to match by ID first, then by name/number
+- When querying, you can use the assembly number (like "ASM-5001") or part of the name
+
+When presenting data, format it nicely using markdown tables or lists as appropriate.
+Always explain your findings in a clear, human-readable way.`,
       messages: await convertToModelMessages(messages),
       tools: graphTools,
       stopWhen: stepCountIs(10),

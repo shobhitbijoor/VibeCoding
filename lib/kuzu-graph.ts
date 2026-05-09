@@ -288,6 +288,312 @@ class KuzuGraph {
     return stats;
   }
 
+  // ========== SPECIFIC QUERY METHODS ==========
+  
+  // Get all customers
+  getAllCustomers(): Node[] {
+    return this.getNodesByLabel('Customer');
+  }
+
+  // Get all assemblies for a customer
+  getCustomerAssemblies(customerId: string): Node[] {
+    // Find assemblies connected to this customer via locations
+    const customerLocations = this.getConnectedNodes(customerId, 'COMMISSIONED_AT', 'out');
+    const assemblies: Node[] = [];
+    
+    // Also check direct relationships
+    const directAssemblies = this.getConnectedNodes(customerId, undefined, 'out')
+      .filter(n => n.label === 'Assembly');
+    assemblies.push(...directAssemblies);
+    
+    // Check assemblies at customer locations
+    customerLocations.forEach(loc => {
+      const locAssemblies = this.getConnectedNodes(loc.id, undefined, 'in')
+        .filter(n => n.label === 'Assembly');
+      assemblies.push(...locAssemblies);
+    });
+    
+    // Also search by customer name in assembly properties
+    const customer = this.getNodeById(customerId);
+    if (customer) {
+      const allAssemblies = this.getNodesByLabel('Assembly');
+      allAssemblies.forEach(asm => {
+        if (!assemblies.find(a => a.id === asm.id)) {
+          assemblies.push(asm);
+        }
+      });
+    }
+    
+    return assemblies;
+  }
+
+  // Get all parts in an assembly
+  getAssemblyParts(assemblyId: string): Node[] {
+    // Try to find by ID first
+    let assembly = this.getNodeById(assemblyId);
+    
+    // If not found, try to find by assembly number or name
+    if (!assembly) {
+      const allAssemblies = this.getNodesByLabel('Assembly');
+      const searchTerm = assemblyId.toLowerCase();
+      assembly = allAssemblies.find(a => 
+        a.properties.assemblyNumber?.toString().toLowerCase() === searchTerm ||
+        a.properties.serialNumber?.toString().toLowerCase() === searchTerm ||
+        a.properties.name?.toString().toLowerCase().includes(searchTerm)
+      );
+    }
+    
+    if (!assembly) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(assembly.id, 'CONTAINS_PART', 'out');
+  }
+
+  // Get suppliers for a part
+  getPartSuppliers(partId: string): Node[] {
+    let part = this.getNodeById(partId);
+    
+    if (!part) {
+      const allParts = this.getNodesByLabel('Part');
+      part = allParts.find(p => 
+        p.properties.partNumber === partId ||
+        p.properties.name?.toString().toLowerCase().includes(partId.toLowerCase())
+      );
+    }
+    
+    if (!part) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(part.id, 'SUPPLIED_BY', 'out');
+  }
+
+  // Get service history for an assembly
+  getAssemblyServiceHistory(assemblyId: string): Node[] {
+    let assembly = this.getNodeById(assemblyId);
+    
+    if (!assembly) {
+      const allAssemblies = this.getNodesByLabel('Assembly');
+      const searchTerm = assemblyId.toLowerCase();
+      assembly = allAssemblies.find(a => 
+        a.properties.assemblyNumber?.toString().toLowerCase() === searchTerm ||
+        a.properties.serialNumber?.toString().toLowerCase() === searchTerm ||
+        a.properties.name?.toString().toLowerCase().includes(searchTerm)
+      );
+    }
+    
+    if (!assembly) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(assembly.id, 'HAS_SERVICE_RECORD', 'out');
+  }
+
+  // Get failures for an assembly
+  getAssemblyFailures(assemblyId: string): Node[] {
+    let assembly = this.getNodeById(assemblyId);
+    
+    if (!assembly) {
+      const allAssemblies = this.getNodesByLabel('Assembly');
+      const searchTerm = assemblyId.toLowerCase();
+      assembly = allAssemblies.find(a => 
+        a.properties.assemblyNumber?.toString().toLowerCase() === searchTerm ||
+        a.properties.serialNumber?.toString().toLowerCase() === searchTerm ||
+        a.properties.name?.toString().toLowerCase().includes(searchTerm)
+      );
+    }
+    
+    if (!assembly) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(assembly.id, 'RELATED_TO_FAILURE', 'out');
+  }
+
+  // Get root causes for failures of an assembly
+  getFailureRootCauses(assemblyId: string): Array<{failure: Node, rootCauses: Node[]}> {
+    const failures = this.getAssemblyFailures(assemblyId);
+    return failures.map(failure => ({
+      failure,
+      rootCauses: this.getConnectedNodes(failure.id, 'CAUSED_BY', 'out')
+    }));
+  }
+
+  // Get parts by lot number
+  getPartsByLot(lotNumber: string): Node[] {
+    const allParts = this.getNodesByLabel('Part');
+    return allParts.filter(p => 
+      p.properties.lotNumber?.toString().toLowerCase().includes(lotNumber.toLowerCase())
+    );
+  }
+
+  // Get purchase orders for a supplier
+  getSupplierPurchaseOrders(supplierId: string): Node[] {
+    let supplier = this.getNodeById(supplierId);
+    
+    if (!supplier) {
+      const allSuppliers = this.getNodesByLabel('Supplier');
+      supplier = allSuppliers.find(s => 
+        s.properties.name?.toString().toLowerCase().includes(supplierId.toLowerCase())
+      );
+    }
+    
+    if (!supplier) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(supplier.id, 'ORDERED_FROM', 'in');
+  }
+
+  // Get parts supplied by a supplier
+  getPartsBySupplier(supplierId: string): Node[] {
+    let supplier = this.getNodeById(supplierId);
+    
+    if (!supplier) {
+      const allSuppliers = this.getNodesByLabel('Supplier');
+      supplier = allSuppliers.find(s => 
+        s.properties.name?.toString().toLowerCase().includes(supplierId.toLowerCase())
+      );
+    }
+    
+    if (!supplier) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(supplier.id, 'SUPPLIED_BY', 'in');
+  }
+
+  // Get assemblies manufactured at a plant
+  getAssembliesByPlant(plantId: string): Node[] {
+    let plant = this.getNodeById(plantId);
+    
+    if (!plant) {
+      const allPlants = this.getNodesByLabel('Plant');
+      plant = allPlants.find(p => 
+        p.properties.name?.toString().toLowerCase().includes(plantId.toLowerCase())
+      );
+    }
+    
+    if (!plant) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(plant.id, 'MANUFACTURED_AT', 'in');
+  }
+
+  // Get parts processed at a station
+  getPartsAtStation(stationId: string): Node[] {
+    let station = this.getNodeById(stationId);
+    
+    if (!station) {
+      const allStations = this.getNodesByLabel('Station');
+      station = allStations.find(s => 
+        s.properties.name?.toString().toLowerCase().includes(stationId.toLowerCase())
+      );
+    }
+    
+    if (!station) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(station.id, 'PROCESSED_AT', 'in');
+  }
+
+  // Get quality inspections for a part
+  getQualityInspections(partId: string): Node[] {
+    let part = this.getNodeById(partId);
+    
+    if (!part) {
+      const allParts = this.getNodesByLabel('Part');
+      part = allParts.find(p => 
+        p.properties.partNumber === partId ||
+        p.properties.name?.toString().toLowerCase().includes(partId.toLowerCase())
+      );
+    }
+    
+    if (!part) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(part.id, 'INSPECTED_BY', 'out');
+  }
+
+  // Get assemblies by warranty status
+  getAssembliesByWarrantyStatus(): { active: Node[]; expired: Node[]; expiringSoon: Node[] } {
+    const assemblies = this.getNodesByLabel('Assembly');
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    
+    const result = {
+      active: [] as Node[],
+      expired: [] as Node[],
+      expiringSoon: [] as Node[],
+    };
+    
+    assemblies.forEach(asm => {
+      const warrantyEnd = asm.properties.warrantyEnd 
+        ? new Date(asm.properties.warrantyEnd as string)
+        : null;
+      
+      if (!warrantyEnd) {
+        result.active.push(asm);
+      } else if (warrantyEnd < now) {
+        result.expired.push(asm);
+      } else if (warrantyEnd < thirtyDaysFromNow) {
+        result.expiringSoon.push(asm);
+      } else {
+        result.active.push(asm);
+      }
+    });
+    
+    return result;
+  }
+
+  // Get locations for a customer
+  getCustomerLocations(customerId: string): Node[] {
+    let customer = this.getNodeById(customerId);
+    
+    if (!customer) {
+      const allCustomers = this.getNodesByLabel('Customer');
+      customer = allCustomers.find(c => 
+        c.properties.name?.toString().toLowerCase().includes(customerId.toLowerCase())
+      );
+    }
+    
+    if (!customer) {
+      return [];
+    }
+    
+    return this.getConnectedNodes(customer.id, 'COMMISSIONED_AT', 'out');
+  }
+
+  // Get all suppliers
+  getAllSuppliers(): Node[] {
+    return this.getNodesByLabel('Supplier');
+  }
+
+  // Get all assemblies
+  getAllAssemblies(): Node[] {
+    return this.getNodesByLabel('Assembly');
+  }
+
+  // Get all parts
+  getAllParts(): Node[] {
+    return this.getNodesByLabel('Part');
+  }
+
+  // Search nodes by name or property value
+  searchNodes(searchTerm: string): Node[] {
+    const term = searchTerm.toLowerCase();
+    return Array.from(this.nodes.values()).filter(node => {
+      const props = node.properties;
+      return Object.values(props).some(val => 
+        val?.toString().toLowerCase().includes(term)
+      );
+    });
+  }
+
   // Initialize with comprehensive dummy data
   private initializeWithDummyData(): void {
     // ===== CUSTOMERS =====
