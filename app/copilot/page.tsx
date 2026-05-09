@@ -170,9 +170,9 @@ export default function CopilotPage() {
   const needsApiKey = !appliedApiKey && appliedModelInfo
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
+    <div className="flex h-screen max-h-screen flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-card px-6 py-4">
+      <div className="flex shrink-0 items-center justify-between border-b bg-card px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -207,7 +207,7 @@ export default function CopilotPage() {
 
       {/* API Key Warning Banner */}
       {needsApiKey && messages.length === 0 && (
-        <div className="border-b bg-amber-50 px-6 py-3 dark:bg-amber-950">
+        <div className="shrink-0 border-b bg-amber-50 px-6 py-3 dark:bg-amber-950">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
             <p className="text-sm text-amber-800 dark:text-amber-200">
@@ -354,7 +354,7 @@ export default function CopilotPage() {
           )}
 
           {/* Input Area */}
-          <div className="border-t bg-card p-4">
+          <div className="shrink-0 border-t bg-card p-4">
             <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl gap-2">
               <Input
                 ref={inputRef}
@@ -384,8 +384,8 @@ export default function CopilotPage() {
 
         {/* Settings Panel */}
         {showSettings && (
-          <div className="w-80 border-l bg-card">
-            <Tabs defaultValue="api" className="h-full">
+          <div className="flex w-80 flex-col overflow-hidden border-l bg-card">
+            <Tabs defaultValue="api" className="flex h-full flex-col overflow-hidden">
               <TabsList className="w-full rounded-none border-b">
                 <TabsTrigger value="api" className="flex-1">API Key</TabsTrigger>
                 <TabsTrigger value="model" className="flex-1">Model</TabsTrigger>
