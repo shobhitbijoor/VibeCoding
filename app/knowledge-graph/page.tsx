@@ -135,6 +135,101 @@ const nodeIcons: Record<NodeDisplayType, typeof Box> = {
   service: Wrench,
 }
 
+// Helper function to extract city from address
+const extractCityFromAddress = (address: string): string => {
+  // Address format: "123 Industrial Blvd, Detroit, MI 48201"
+  const parts = address.split(',')
+  if (parts.length >= 2) {
+    return parts[1].trim() // Return the city part
+  }
+  return address.split(' ')[0] // Fallback to first word
+}
+
+// Helper function to get display label for a node
+const getNodeDisplayLabel = (node: ApiNode): string => {
+  const props = node.properties
+  
+  switch (node.label) {
+    case 'CustomerLocation':
+      // Use siteName but extract city if it's a plant-like name, or use address city
+      if (props.siteName) {
+        const siteName = String(props.siteName)
+        // If siteName contains city info, extract it
+        if (siteName.includes('Plant') || siteName.includes('Factory') || siteName.includes('Center')) {
+          // Extract city from siteName (e.g., "Detroit Plant" -> "Detroit")
+          return siteName.replace(/ (Plant|Factory|Center|Facility|HQ|R&D|Assembly|MRO|Gigafactory|Service|Cleanroom|Manufacturing|Processing|Mine|Fab|Test|Depot|Wind|Solar|Battery).*$/i, '').trim()
+        }
+        return siteName
+      }
+      if (props.address) {
+        return extractCityFromAddress(String(props.address))
+      }
+      return node.id
+      
+    case 'QualityInspection':
+      // Show inspection type instead of part/serial number
+      if (props.type) {
+        return String(props.type)
+      }
+      if (props.stage) {
+        return `${String(props.stage)} Inspection`
+      }
+      return 'Inspection'
+      
+    case 'ServiceRecord':
+      // Show service type
+      if (props.type) {
+        return String(props.type)
+      }
+      if (props.serviceId) {
+        return String(props.serviceId)
+      }
+      return 'Service'
+      
+    case 'Warranty':
+      if (props.type) {
+        return `${String(props.type)} Warranty`
+      }
+      if (props.warrantyId) {
+        return String(props.warrantyId)
+      }
+      return 'Warranty'
+      
+    case 'Customer':
+      return props.name ? String(props.name) : node.id
+      
+    case 'Supplier':
+      return props.name ? String(props.name) : node.id
+      
+    case 'Assembly':
+      // Prefer name over serial number for readability
+      if (props.name) {
+        return String(props.name)
+      }
+      return props.serialNumber ? String(props.serialNumber) : node.id
+      
+    case 'Part':
+      if (props.name) {
+        return String(props.name)
+      }
+      return props.partNumber ? String(props.partNumber) : node.id
+      
+    case 'SupplierPO':
+      return props.poNumber ? String(props.poNumber) : node.id
+      
+    case 'Plant':
+      if (props.name) {
+        // Extract plant location (e.g., "Detroit Manufacturing Hub" -> "Detroit Mfg")
+        const name = String(props.name)
+        return name.length > 15 ? name.substring(0, 12) + '...' : name
+      }
+      return props.plantCode ? String(props.plantCode) : node.id
+      
+    default:
+      return props.name ? String(props.name) : node.id
+  }
+}
+
 export default function KnowledgeGraphPage() {
   // Filter states
   const [selectedProduct, setSelectedProduct] = useState<string>("")
@@ -199,41 +294,9 @@ export default function KnowledgeGraphPage() {
     fetchFilterOptions()
   }, [])
 
-  // Calculate node positions in a force-directed-like layout
+  // Calculate node positions with improved hierarchical layout
   const calculateNodePositions = useCallback((nodes: ApiNode[], relationships: ApiRelationship[]): GraphNode[] => {
     if (nodes.length === 0) return []
-
-    // Group nodes by type for layered layout
-    const nodesByType: Record<string, ApiNode[]> = {}
-    nodes.forEach(node => {
-      const type = node.label
-      if (!nodesByType[type]) nodesByType[type] = []
-      nodesByType[type].push(node)
-    })
-
-    // Define layer order (left to right)
-    const layerOrder = [
-      'Supplier',
-      'SupplierPO',
-      'Part',
-      'Plant',
-      'Assembly',
-      'Customer',
-      'CustomerLocation',
-      'QualityInspection',
-      'ServiceRecord',
-      'Warranty',
-    ]
-
-    // Calculate positions
-    const graphNodes: GraphNode[] = []
-    const viewWidth = 900
-    const viewHeight = 500
-    const padding = 80
-    
-    // Get active layers (layers that have nodes)
-    const activeLayers = layerOrder.filter(type => nodesByType[type]?.length > 0)
-    const layerWidth = (viewWidth - 2 * padding) / Math.max(activeLayers.length - 1, 1)
 
     // Build connection map for each node
     const connectionMap: Record<string, string[]> = {}
@@ -249,45 +312,162 @@ export default function KnowledgeGraphPage() {
       }
     })
 
-    activeLayers.forEach((type, layerIndex) => {
-      const layerNodes = nodesByType[type] || []
-      const layerHeight = (viewHeight - 2 * padding) / Math.max(layerNodes.length - 1, 1)
-      
-      layerNodes.forEach((node, nodeIndex) => {
-        const x = padding + layerIndex * layerWidth
-        const y = layerNodes.length === 1 
-          ? viewHeight / 2 
-          : padding + nodeIndex * layerHeight
+    // Group nodes by type
+    const nodesByType: Record<string, ApiNode[]> = {}
+    nodes.forEach(node => {
+      const type = node.label
+      if (!nodesByType[type]) nodesByType[type] = []
+      nodesByType[type].push(node)
+    })
 
-        // Get display label
-        let displayLabel = ''
-        if (node.properties.name) {
-          displayLabel = String(node.properties.name)
-        } else if (node.properties.serialNumber) {
-          displayLabel = String(node.properties.serialNumber)
-        } else if (node.properties.poNumber) {
-          displayLabel = String(node.properties.poNumber)
-        } else if (node.properties.partNumber) {
-          displayLabel = String(node.properties.partNumber)
-        } else if (node.properties.inspectionId) {
-          displayLabel = String(node.properties.inspectionId)
-        } else if (node.properties.warrantyId) {
-          displayLabel = String(node.properties.warrantyId)
-        } else if (node.properties.serviceId) {
-          displayLabel = String(node.properties.serviceId)
+    const graphNodes: GraphNode[] = []
+    const viewWidth = 900
+    const viewHeight = 500
+    const padding = 60
+    const nodeSpacing = 80
+
+    // Find the main assembly node (central node for the layout)
+    const assemblyNode = nodesByType['Assembly']?.[0]
+    const assemblyId = assemblyNode?.id
+
+    // Define layout zones (x positions)
+    const zones = {
+      supplier: 60,
+      supplierPO: 160,
+      part: 260,
+      partInspection: 260, // Above part
+      plant: 360,
+      assembly: 460,
+      customer: 560,
+      customerSite: 560, // Below customer
+      warranty: 660,
+      service: 460, // Below assembly
+      commissioning: 560, // Below customer site
+    }
+
+    // Position each node based on its type and relationships
+    const positionedNodes: Record<string, { x: number; y: number }> = {}
+    const centerY = viewHeight / 2
+
+    // 1. Position Assembly (center)
+    if (nodesByType['Assembly']) {
+      nodesByType['Assembly'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.assembly, y: centerY }
+      })
+    }
+
+    // 2. Position Customer (above center line)
+    if (nodesByType['Customer']) {
+      nodesByType['Customer'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.customer, y: centerY - 60 }
+      })
+    }
+
+    // 3. Position CustomerLocation (below customer, same column)
+    if (nodesByType['CustomerLocation']) {
+      nodesByType['CustomerLocation'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.customerSite, y: centerY + 20 }
+      })
+    }
+
+    // 4. Position Part (to the left of assembly)
+    if (nodesByType['Part']) {
+      nodesByType['Part'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.part, y: centerY }
+      })
+    }
+
+    // 5. Position QualityInspection based on type
+    if (nodesByType['QualityInspection']) {
+      const receivingInspections: ApiNode[] = []
+      const assemblyInspections: ApiNode[] = []
+      const commissioningInspections: ApiNode[] = []
+      const otherInspections: ApiNode[] = []
+
+      nodesByType['QualityInspection'].forEach(node => {
+        const stage = String(node.properties.stage || '').toLowerCase()
+        const type = String(node.properties.type || '').toLowerCase()
+        
+        if (stage === 'receiving' || type.includes('incoming')) {
+          receivingInspections.push(node)
+        } else if (stage === 'assembly' || type.includes('in-process')) {
+          assemblyInspections.push(node)
+        } else if (stage === 'commissioning' || type.includes('commissioning')) {
+          commissioningInspections.push(node)
         } else {
-          displayLabel = node.id
+          otherInspections.push(node)
         }
+      })
 
-        graphNodes.push({
-          id: node.id,
-          label: displayLabel,
-          nodeType: node.label,
-          x,
-          y,
-          properties: node.properties,
-          connections: connectionMap[node.id] || [],
-        })
+      // Receiving inspections above the Part
+      receivingInspections.forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.partInspection, y: centerY - 80 - (idx * 50) }
+      })
+
+      // Assembly inspections near the assembly
+      assemblyInspections.forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.assembly - 60, y: centerY - 80 - (idx * 50) }
+      })
+
+      // Commissioning inspections near customer site
+      commissioningInspections.forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.commissioning, y: centerY + 100 + (idx * 50) }
+      })
+
+      // Other inspections
+      otherInspections.forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.warranty, y: centerY - 80 - (idx * 50) }
+      })
+    }
+
+    // 6. Position SupplierPO
+    if (nodesByType['SupplierPO']) {
+      nodesByType['SupplierPO'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.supplierPO, y: centerY }
+      })
+    }
+
+    // 7. Position Supplier
+    if (nodesByType['Supplier']) {
+      nodesByType['Supplier'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.supplier, y: centerY }
+      })
+    }
+
+    // 8. Position Warranty (to the right of customer)
+    if (nodesByType['Warranty']) {
+      nodesByType['Warranty'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.warranty, y: centerY - 20 + (idx * 60) }
+      })
+    }
+
+    // 9. Position ServiceRecord (below assembly, side by side)
+    if (nodesByType['ServiceRecord']) {
+      const serviceStartX = zones.assembly - ((nodesByType['ServiceRecord'].length - 1) * 40)
+      nodesByType['ServiceRecord'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: serviceStartX + (idx * 80), y: centerY + 120 }
+      })
+    }
+
+    // 10. Position Plant (between part and assembly, slightly above)
+    if (nodesByType['Plant']) {
+      nodesByType['Plant'].forEach((node, idx) => {
+        positionedNodes[node.id] = { x: zones.plant, y: centerY - 40 }
+      })
+    }
+
+    // Create GraphNode objects with calculated positions
+    nodes.forEach(node => {
+      const pos = positionedNodes[node.id] || { x: viewWidth / 2, y: viewHeight / 2 }
+      
+      graphNodes.push({
+        id: node.id,
+        label: getNodeDisplayLabel(node),
+        nodeType: node.label,
+        x: pos.x,
+        y: pos.y,
+        properties: node.properties,
+        connections: connectionMap[node.id] || [],
       })
     })
 
