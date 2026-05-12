@@ -10,6 +10,7 @@ import {
   Zap,
   Database,
   MessageSquare,
+  Share2,
 } from "lucide-react"
 import {
   Sidebar,
@@ -42,6 +43,12 @@ const mainNavItems = [
     title: "Workspace",
     icon: Briefcase,
     href: "/workspace",
+    disabled: false,
+  },
+  {
+    title: "Knowledge Graph",
+    icon: Share2,
+    href: "/knowledge-graph",
     disabled: false,
   },
   {
