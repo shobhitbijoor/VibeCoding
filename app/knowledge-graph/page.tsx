@@ -348,11 +348,11 @@ export default function KnowledgeGraphPage() {
 
     const graphNodes: GraphNode[] = []
     
-    // Grid layout configuration - larger spacing to prevent overlaps
-    const colWidth = 120  // Horizontal spacing between columns
-    const rowHeight = 100 // Vertical spacing between rows
-    const startX = 80
-    const startY = 80
+    // Grid layout configuration - larger spacing for bigger viewport (1200x700)
+    const colWidth = 150  // Horizontal spacing between columns
+    const rowHeight = 120 // Vertical spacing between rows
+    const startX = 100
+    const startY = 120
     
     // Define column positions (left to right flow)
     const columns = {
@@ -365,7 +365,7 @@ export default function KnowledgeGraphPage() {
       warranty: 6,
     }
     
-    // Define row positions (center row is 2, top is 0, bottom is 4)
+    // Define row positions (center row is 2, top is 0, bottom is 4+)
     const rows = {
       top: 0,
       upperMiddle: 1,
@@ -812,10 +812,10 @@ export default function KnowledgeGraphPage() {
       ) : (
         <Card className="bg-card border-border">
           <CardContent className="p-4">
-            <div className="grid grid-cols-5 gap-4">
+            <div className="grid grid-cols-6 gap-3">
               {/* Graph Area */}
-              <div className="col-span-3">
-                <div className="relative bg-secondary/30 rounded-lg border border-border h-[500px] overflow-hidden">
+              <div className="col-span-5">
+                <div className="relative bg-secondary/30 rounded-lg border border-border h-[600px] overflow-auto">
                   {isLoading ? (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -825,7 +825,7 @@ export default function KnowledgeGraphPage() {
                       <p className="text-sm text-muted-foreground">No nodes found for the selected filters</p>
                     </div>
                   ) : (
-                    <svg width="100%" height="100%" viewBox="0 0 900 500">
+                    <svg width="1200" height="700" viewBox="0 0 1200 700" className="min-w-[1200px] min-h-[700px]">
                       {/* Connections */}
                       {graphNodes.map((node) =>
                         node.connections.map((connId) => {
@@ -955,8 +955,8 @@ export default function KnowledgeGraphPage() {
               </div>
 
               {/* Details Panel */}
-              <div className="col-span-2">
-                <div className="bg-secondary/30 rounded-lg border border-border h-[500px] p-3 overflow-auto">
+              <div className="col-span-1">
+                <div className="bg-secondary/30 rounded-lg border border-border h-[600px] p-3 overflow-auto">
                   {selectedNode ? (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
