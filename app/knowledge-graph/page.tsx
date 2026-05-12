@@ -225,6 +225,31 @@ const getNodeDisplayLabel = (node: ApiNode): string => {
       }
       return props.plantCode ? String(props.plantCode) : node.id
       
+    case 'Deviation':
+      // Show deviation type (Material, Process, Installation, etc.)
+      if (props.type) {
+        return `${String(props.type)} Deviation`
+      }
+      if (props.deviationId) {
+        return String(props.deviationId)
+      }
+      return 'Deviation'
+      
+    case 'RootCause':
+      if (props.category) {
+        return String(props.category)
+      }
+      if (props.causeId) {
+        return String(props.causeId)
+      }
+      return 'Root Cause'
+      
+    case 'Failure':
+      if (props.failureId) {
+        return String(props.failureId)
+      }
+      return 'Failure'
+      
     default:
       return props.name ? String(props.name) : node.id
   }
@@ -294,7 +319,8 @@ export default function KnowledgeGraphPage() {
     fetchFilterOptions()
   }, [])
 
-  // Calculate node positions with improved hierarchical layout
+  // Calculate node positions with clean grid-based hierarchical layout
+  // Layout follows a strict grid to avoid diagonal edges and overlapping
   const calculateNodePositions = useCallback((nodes: ApiNode[], relationships: ApiRelationship[]): GraphNode[] => {
     if (nodes.length === 0) return []
 
@@ -321,68 +347,105 @@ export default function KnowledgeGraphPage() {
     })
 
     const graphNodes: GraphNode[] = []
-    const viewWidth = 900
-    const viewHeight = 500
-    const padding = 60
-    const nodeSpacing = 80
-
-    // Find the main assembly node (central node for the layout)
-    const assemblyNode = nodesByType['Assembly']?.[0]
-    const assemblyId = assemblyNode?.id
-
-    // Define layout zones (x positions)
-    const zones = {
-      supplier: 60,
-      supplierPO: 160,
-      part: 260,
-      partInspection: 260, // Above part
-      plant: 360,
-      assembly: 460,
-      customer: 560,
-      customerSite: 560, // Below customer
-      warranty: 660,
-      service: 460, // Below assembly
-      commissioning: 560, // Below customer site
+    
+    // Grid layout configuration - larger spacing to prevent overlaps
+    const colWidth = 120  // Horizontal spacing between columns
+    const rowHeight = 100 // Vertical spacing between rows
+    const startX = 80
+    const startY = 80
+    
+    // Define column positions (left to right flow)
+    const columns = {
+      supplier: 0,
+      supplierPO: 1,
+      part: 2,
+      plant: 3,
+      assembly: 4,
+      customer: 5,
+      warranty: 6,
+    }
+    
+    // Define row positions (center row is 2, top is 0, bottom is 4)
+    const rows = {
+      top: 0,
+      upperMiddle: 1,
+      center: 2,
+      lowerMiddle: 3,
+      bottom: 4,
     }
 
-    // Position each node based on its type and relationships
+    // Position each node based on its type
     const positionedNodes: Record<string, { x: number; y: number }> = {}
-    const centerY = viewHeight / 2
+    
+    // Helper to calculate x,y from column and row
+    const getPos = (col: number, row: number) => ({
+      x: startX + col * colWidth,
+      y: startY + row * rowHeight
+    })
 
-    // 1. Position Assembly (center)
-    if (nodesByType['Assembly']) {
-      nodesByType['Assembly'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.assembly, y: centerY }
+    // ROW 2 (CENTER) - Main supply chain flow: Supplier -> PO -> Part -> Plant -> Assembly -> Customer -> Warranty
+    
+    // Supplier (column 0, center row)
+    if (nodesByType['Supplier']) {
+      nodesByType['Supplier'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.supplier, rows.center + idx)
       })
     }
 
-    // 2. Position Customer (above center line)
-    if (nodesByType['Customer']) {
-      nodesByType['Customer'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.customer, y: centerY - 60 }
+    // SupplierPO (column 1, center row)
+    if (nodesByType['SupplierPO']) {
+      nodesByType['SupplierPO'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.supplierPO, rows.center + idx)
       })
     }
 
-    // 3. Position CustomerLocation (below customer, same column)
-    if (nodesByType['CustomerLocation']) {
-      nodesByType['CustomerLocation'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.customerSite, y: centerY + 20 }
-      })
-    }
-
-    // 4. Position Part (to the left of assembly)
+    // Part (column 2, center row)
     if (nodesByType['Part']) {
       nodesByType['Part'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.part, y: centerY }
+        positionedNodes[node.id] = getPos(columns.part, rows.center + idx)
       })
     }
 
-    // 5. Position QualityInspection based on type
+    // Plant (column 3, center row - slightly above if there's space)
+    if (nodesByType['Plant']) {
+      nodesByType['Plant'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.plant, rows.center)
+      })
+    }
+
+    // Assembly (column 4, center row)
+    if (nodesByType['Assembly']) {
+      nodesByType['Assembly'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.assembly, rows.center)
+      })
+    }
+
+    // Customer (column 5, upper middle - directly above CustomerLocation)
+    if (nodesByType['Customer']) {
+      nodesByType['Customer'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.customer, rows.upperMiddle)
+      })
+    }
+
+    // CustomerLocation (column 5, center - below Customer, same column for vertical alignment)
+    if (nodesByType['CustomerLocation']) {
+      nodesByType['CustomerLocation'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.customer, rows.center)
+      })
+    }
+
+    // Warranty (column 6, upper middle - same row as Customer for horizontal alignment)
+    if (nodesByType['Warranty']) {
+      nodesByType['Warranty'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.warranty, rows.upperMiddle + idx)
+      })
+    }
+
+    // ROW 0-1 (TOP) - Inspections related to receiving and assembly (above the main flow)
     if (nodesByType['QualityInspection']) {
       const receivingInspections: ApiNode[] = []
       const assemblyInspections: ApiNode[] = []
       const commissioningInspections: ApiNode[] = []
-      const otherInspections: ApiNode[] = []
 
       nodesByType['QualityInspection'].forEach(node => {
         const stage = String(node.properties.stage || '').toLowerCase()
@@ -394,71 +457,61 @@ export default function KnowledgeGraphPage() {
           assemblyInspections.push(node)
         } else if (stage === 'commissioning' || type.includes('commissioning')) {
           commissioningInspections.push(node)
-        } else {
-          otherInspections.push(node)
         }
       })
 
-      // Receiving inspections above the Part
+      // Receiving inspections - directly above Part (column 2, row 0-1)
       receivingInspections.forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.partInspection, y: centerY - 80 - (idx * 50) }
+        positionedNodes[node.id] = getPos(columns.part, rows.top + idx)
       })
 
-      // Assembly inspections near the assembly
+      // Assembly inspections - directly above Assembly (column 4, row 0-1)
       assemblyInspections.forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.assembly - 60, y: centerY - 80 - (idx * 50) }
+        positionedNodes[node.id] = getPos(columns.assembly, rows.top + idx)
       })
 
-      // Commissioning inspections near customer site
+      // Commissioning inspections - below CustomerLocation (column 5, row 3-4)
       commissioningInspections.forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.commissioning, y: centerY + 100 + (idx * 50) }
-      })
-
-      // Other inspections
-      otherInspections.forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.warranty, y: centerY - 80 - (idx * 50) }
+        positionedNodes[node.id] = getPos(columns.customer, rows.lowerMiddle + idx)
       })
     }
 
-    // 6. Position SupplierPO
-    if (nodesByType['SupplierPO']) {
-      nodesByType['SupplierPO'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.supplierPO, y: centerY }
-      })
-    }
-
-    // 7. Position Supplier
-    if (nodesByType['Supplier']) {
-      nodesByType['Supplier'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.supplier, y: centerY }
-      })
-    }
-
-    // 8. Position Warranty (to the right of customer)
-    if (nodesByType['Warranty']) {
-      nodesByType['Warranty'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.warranty, y: centerY - 20 + (idx * 60) }
-      })
-    }
-
-    // 9. Position ServiceRecord (below assembly, side by side)
+    // ROW 3-4 (BOTTOM) - Service records below Assembly (spread horizontally if multiple)
     if (nodesByType['ServiceRecord']) {
-      const serviceStartX = zones.assembly - ((nodesByType['ServiceRecord'].length - 1) * 40)
+      const numServices = nodesByType['ServiceRecord'].length
+      // Place service records below assembly, spread horizontally
       nodesByType['ServiceRecord'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: serviceStartX + (idx * 80), y: centerY + 120 }
+        // Center the service records around the assembly column
+        const offset = idx - Math.floor(numServices / 2)
+        const col = Math.max(0, columns.assembly + offset)
+        positionedNodes[node.id] = getPos(col, rows.lowerMiddle)
       })
     }
 
-    // 10. Position Plant (between part and assembly, slightly above)
-    if (nodesByType['Plant']) {
-      nodesByType['Plant'].forEach((node, idx) => {
-        positionedNodes[node.id] = { x: zones.plant, y: centerY - 40 }
+    // Deviation nodes - place near the related part (column 2, row 3)
+    if (nodesByType['Deviation']) {
+      nodesByType['Deviation'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.part, rows.lowerMiddle + idx)
+      })
+    }
+
+    // RootCause nodes - place near deviation (column 1, row 3)
+    if (nodesByType['RootCause']) {
+      nodesByType['RootCause'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.supplierPO, rows.lowerMiddle + idx)
+      })
+    }
+
+    // Failure nodes - place near assembly (column 4, row 3)
+    if (nodesByType['Failure']) {
+      nodesByType['Failure'].forEach((node, idx) => {
+        positionedNodes[node.id] = getPos(columns.assembly, rows.bottom + idx)
       })
     }
 
     // Create GraphNode objects with calculated positions
     nodes.forEach(node => {
-      const pos = positionedNodes[node.id] || { x: viewWidth / 2, y: viewHeight / 2 }
+      const pos = positionedNodes[node.id] || getPos(columns.assembly, rows.center)
       
       graphNodes.push({
         id: node.id,
