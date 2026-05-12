@@ -4,7 +4,6 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
   Briefcase,
-  Sparkles,
   Settings,
   HelpCircle,
   ChevronLeft,
@@ -43,12 +42,6 @@ const mainNavItems = [
     title: "Workspace",
     icon: Briefcase,
     href: "/workspace",
-    disabled: false,
-  },
-  {
-    title: "AI Assistant",
-    icon: Sparkles,
-    href: "/assistant",
     disabled: false,
   },
   {
