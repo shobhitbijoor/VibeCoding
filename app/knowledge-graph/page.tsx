@@ -812,9 +812,9 @@ export default function KnowledgeGraphPage() {
       ) : (
         <Card className="bg-card border-border">
           <CardContent className="p-4">
-            <div className="grid grid-cols-6 gap-3">
-              {/* Graph Area */}
-              <div className="col-span-5">
+            <div className="flex gap-4">
+              {/* Graph Area - takes most space */}
+              <div className="flex-1 min-w-0">
                 <div className="relative bg-secondary/30 rounded-lg border border-border h-[600px] overflow-auto">
                   {isLoading ? (
                     <div className="absolute inset-0 flex items-center justify-center">
@@ -825,7 +825,14 @@ export default function KnowledgeGraphPage() {
                       <p className="text-sm text-muted-foreground">No nodes found for the selected filters</p>
                     </div>
                   ) : (
-                    <svg width="1200" height="700" viewBox="0 0 1200 700" className="min-w-[1200px] min-h-[700px]">
+                    <svg 
+                      width={Math.max(1200, graphNodes.reduce((max, n) => Math.max(max, n.x + 100), 0))} 
+                      height={Math.max(700, graphNodes.reduce((max, n) => Math.max(max, n.y + 100), 0))}
+                      style={{ 
+                        minWidth: Math.max(1200, graphNodes.reduce((max, n) => Math.max(max, n.x + 100), 0)),
+                        minHeight: Math.max(700, graphNodes.reduce((max, n) => Math.max(max, n.y + 100), 0))
+                      }}
+                    >
                       {/* Connections */}
                       {graphNodes.map((node) =>
                         node.connections.map((connId) => {
@@ -954,15 +961,15 @@ export default function KnowledgeGraphPage() {
                 )}
               </div>
 
-              {/* Details Panel */}
-              <div className="col-span-1">
+              {/* Details Panel - fixed width for balance */}
+              <div className="w-[280px] flex-shrink-0">
                 <div className="bg-secondary/30 rounded-lg border border-border h-[600px] p-3 overflow-auto">
                   {selectedNode ? (
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 min-w-0">
                           <div 
-                            className="w-6 h-6 rounded flex items-center justify-center"
+                            className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
                             style={{ backgroundColor: nodeColors[labelToDisplayType[selectedNode.nodeType] || "component"].fill }}
                           >
                             {(() => {
@@ -971,7 +978,7 @@ export default function KnowledgeGraphPage() {
                               return <IconComponent size={14} color={nodeColors[displayType].iconColor} strokeWidth={2} />
                             })()}
                           </div>
-                          <h4 className="text-sm font-medium">{selectedNode.label}</h4>
+                          <h4 className="text-sm font-medium break-words">{selectedNode.label}</h4>
                         </div>
                         <Badge
                           variant="outline"
@@ -992,9 +999,9 @@ export default function KnowledgeGraphPage() {
                         <p className="text-xs text-muted-foreground font-medium">Properties</p>
                         <div className="space-y-1.5">
                           {Object.entries(selectedNode.properties).map(([key, value]) => (
-                            <div key={key} className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">{key}</span>
-                              <span className="font-medium text-right max-w-[60%] truncate">
+                            <div key={key} className="flex justify-between gap-2 text-xs">
+                              <span className="text-muted-foreground flex-shrink-0">{key}</span>
+                              <span className="font-medium text-right break-words">
                                 {Array.isArray(value) ? value.join(', ') : String(value)}
                               </span>
                             </div>
