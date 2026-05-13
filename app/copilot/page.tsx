@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils"
 const AVAILABLE_MODELS = [
   { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
   { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
+  { id: "azure-coe/gpt-4o", name: "GPT-4o CoE", provider: "Azure CoE", envKey: "AZURE_COE_API_KEY" },
   { id: "anthropic/claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
   { id: "anthropic/claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", provider: "Anthropic", envKey: "ANTHROPIC_API_KEY" },
   { id: "google/gemini-3-flash", name: "Gemini 3 Flash", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },

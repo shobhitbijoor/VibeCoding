@@ -6,6 +6,7 @@ import {
   stepCountIs,
 } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
+import { createAzure } from '@ai-sdk/azure'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
@@ -414,6 +415,23 @@ const graphTools = {
 
 // Helper function to get the model based on provider and API key
 function getModel(modelId: string, userProvidedApiKey?: string) {
+  // Handle Azure CoE GPT-4o model
+  if (modelId.startsWith('azure-coe/')) {
+    const apiKey = userProvidedApiKey || process.env.AZURE_COE_API_KEY
+    const endpoint = process.env.AZURE_COE_ENDPOINT
+    if (!apiKey) {
+      throw new Error('Azure CoE API key is required. Set AZURE_COE_API_KEY in environment variables or provide an API key in settings.')
+    }
+    if (!endpoint) {
+      throw new Error('Azure CoE endpoint is required. Set AZURE_COE_ENDPOINT in environment variables.')
+    }
+    const azure = createAzure({
+      apiKey,
+      baseURL: endpoint.replace('/chat/completions', '').replace(/\?.*$/, ''),
+    })
+    return azure('gpt-4o')
+  }
+
   if (modelId.startsWith('openai/')) {
     const apiKey = userProvidedApiKey || process.env.OPENAI_API_KEY
     if (!apiKey) {
@@ -444,7 +462,7 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
     return google(modelName)
   }
   
-  throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/`)
+  throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/, azure-coe/`)
 }
 
 export async function POST(req: Request) {
