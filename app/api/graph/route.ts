@@ -86,7 +86,12 @@ export async function GET(request: NextRequest) {
       }
 
       default:
-        return NextResponse.json(graph.getStatistics());
+        // Return all nodes and relationships for the knowledge graph page
+        return NextResponse.json({
+          nodes: graph.getAllNodes(),
+          relationships: graph.getAllRelationships(),
+          statistics: graph.getStatistics(),
+        });
     }
   } catch (error) {
     console.error('Graph API error:', error);

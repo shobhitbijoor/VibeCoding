@@ -263,7 +263,7 @@ export default function DataManagementPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Data Import/Export</h1>
           <p className="text-muted-foreground">
-            Manage your Kuzu graph database data with import, export, and versioning
+            Manage your graph database data with import, export, and versioning
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => {
@@ -334,7 +334,7 @@ export default function DataManagementPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold text-primary">Kuzu</div>
+            <div className="text-xl font-bold text-primary">Knowledge Graph</div>
             <p className="text-sm text-muted-foreground">Embedded graph database for manufacturing traceability</p>
           </CardContent>
         </Card>

@@ -4,13 +4,13 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
   Briefcase,
-  Sparkles,
   Settings,
   HelpCircle,
   ChevronLeft,
   Zap,
   Database,
   MessageSquare,
+  Share2,
 } from "lucide-react"
 import {
   Sidebar,
@@ -46,9 +46,9 @@ const mainNavItems = [
     disabled: false,
   },
   {
-    title: "AI Assistant",
-    icon: Sparkles,
-    href: "/assistant",
+    title: "Knowledge Graph",
+    icon: Share2,
+    href: "/knowledge-graph",
     disabled: false,
   },
   {
