@@ -475,7 +475,22 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
     return modelId
   }
   
-  throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/, azure-coe/`)
+  if (modelId.startsWith('huggingface/')) {
+    const apiKey = userProvidedApiKey || process.env.HUGGINGFACE_API_KEY
+    if (!apiKey) {
+      throw new Error('Hugging Face API key is required. Get your free API key from: https://huggingface.co/settings/tokens')
+    }
+    // Extract the model name (e.g., "mistralai/Mistral-7B-Instruct-v0.3" from "huggingface/mistralai/Mistral-7B-Instruct-v0.3")
+    const modelName = modelId.replace('huggingface/', '')
+    // Use OpenAI-compatible endpoint for Hugging Face Inference API
+    const hfOpenAI = createOpenAI({
+      apiKey,
+      baseURL: 'https://api-inference.huggingface.co/v1',
+    })
+    return hfOpenAI(modelName)
+  }
+  
+  throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/, azure-coe/, huggingface/`)
 }
 
 export async function POST(req: Request) {
