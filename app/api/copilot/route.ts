@@ -480,13 +480,12 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
     if (!apiKey) {
       throw new Error('Hugging Face API key is required. Get your free API key from: https://huggingface.co/settings/tokens')
     }
-    // Extract the model name (e.g., "Qwen/Qwen2.5-7B-Instruct-1M" from "huggingface/Qwen/Qwen2.5-7B-Instruct-1M")
+    // Extract the model name (e.g., "Meta-Llama-3.3-70B-Instruct" from "huggingface/Meta-Llama-3.3-70B-Instruct")
     const modelName = modelId.replace('huggingface/', '')
-    // Use OpenAI SDK with HuggingFace's router inference endpoint
-    // Format: https://router.huggingface.co/hf-inference/models/{model}/v1
+    // Use SambaNova provider via Hugging Face router (free tier available)
     const huggingface = createOpenAI({
       apiKey,
-      baseURL: `https://router.huggingface.co/hf-inference/models/${modelName}/v1`,
+      baseURL: 'https://router.huggingface.co/sambanova/v1',
     })
     return huggingface(modelName)
   }

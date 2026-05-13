@@ -42,6 +42,8 @@ import { cn } from "@/lib/utils"
 
 // Available LLM models organized by provider
 const AVAILABLE_MODELS = [
+  { id: "huggingface/Meta-Llama-3.3-70B-Instruct", name: "Llama 3.3 70B (Free)", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
+  { id: "huggingface/Meta-Llama-3.1-8B-Instruct", name: "Llama 3.1 8B (Free)", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
   { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
   { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", envKey: "OPENAI_API_KEY" },
   { id: "azure-coe/gpt-4o", name: "GPT-4o CoE", provider: "Azure CoE", envKey: "AZURE_COE_API_KEY" },
@@ -51,8 +53,6 @@ const AVAILABLE_MODELS = [
   { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
   { id: "google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
   { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "huggingface/Qwen/Qwen2.5-7B-Instruct-1M", name: "Qwen 2.5 7B Instruct", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
-  { id: "huggingface/google/gemma-2-2b-it", name: "Gemma 2 2B", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
 ]
 
 // Example questions for users
