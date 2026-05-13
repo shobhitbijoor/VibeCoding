@@ -425,10 +425,16 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
     if (!endpoint) {
       throw new Error('Azure CoE endpoint is required. Set AZURE_COE_ENDPOINT in environment variables.')
     }
+    // Extract resource name from endpoint: https://mfg-nag-openai-models.openai.azure.com/...
+    // becomes "mfg-nag-openai-models"
+    const urlMatch = endpoint.match(/https:\/\/([^.]+)\.openai\.azure\.com/)
+    const resourceName = urlMatch ? urlMatch[1] : 'mfg-nag-openai-models'
+    
     const azure = createAzure({
+      resourceName,
       apiKey,
-      baseURL: endpoint.replace('/chat/completions', '').replace(/\?.*$/, ''),
     })
+    // Use the deployment name from the endpoint (gpt-4o)
     return azure('gpt-4o')
   }
 
