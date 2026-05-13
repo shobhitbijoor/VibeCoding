@@ -51,8 +51,8 @@ const AVAILABLE_MODELS = [
   { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
   { id: "google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
   { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", provider: "Google", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "huggingface/mistralai/Mistral-7B-Instruct-v0.3", name: "Mistral 7B Instruct", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
-  { id: "huggingface/meta-llama/Llama-3.2-3B-Instruct", name: "Llama 3.2 3B Instruct", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
+  { id: "huggingface/mistralai/Mistral-Small-24B-Instruct-2501", name: "Mistral Small 24B", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
+  { id: "huggingface/Qwen/Qwen2.5-72B-Instruct", name: "Qwen 2.5 72B Instruct", provider: "Hugging Face", envKey: "HUGGINGFACE_API_KEY" },
 ]
 
 // Example questions for users
