@@ -7,7 +7,6 @@ import {
 } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAzure } from '@ai-sdk/azure'
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { z } from 'zod'
 import { getGraphDatabase } from '@/lib/kuzu-graph'
 
@@ -486,15 +485,12 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
     // Extract the model name (e.g., "mistralai/Mistral-Small-24B-Instruct-2501" from "huggingface/mistralai/Mistral-Small-24B-Instruct-2501")
     const modelName = modelId.replace('huggingface/', '')
     console.log('[v0] HuggingFace model name:', modelName)
-    // Use OpenAI-compatible provider with HuggingFace's chat completions endpoint
-    const huggingface = createOpenAICompatible({
-      name: 'huggingface',
-      baseURL: 'https://api-inference.huggingface.co/models/' + modelName + '/v1',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+    // Use OpenAI SDK with HuggingFace's serverless inference endpoint
+    const huggingface = createOpenAI({
+      apiKey,
+      baseURL: 'https://api-inference.huggingface.co/v1/',
     })
-    return huggingface.chatModel(modelName)
+    return huggingface(modelName)
   }
   
   throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/, azure-coe/, huggingface/`)
