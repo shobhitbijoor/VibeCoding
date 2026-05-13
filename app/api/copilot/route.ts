@@ -477,18 +477,16 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
   
   if (modelId.startsWith('huggingface/')) {
     const apiKey = userProvidedApiKey || process.env.HUGGINGFACE_API_KEY
-    console.log('[v0] HuggingFace model requested:', modelId)
-    console.log('[v0] HuggingFace API key exists:', !!apiKey)
     if (!apiKey) {
       throw new Error('Hugging Face API key is required. Get your free API key from: https://huggingface.co/settings/tokens')
     }
-    // Extract the model name (e.g., "mistralai/Mistral-Small-24B-Instruct-2501" from "huggingface/mistralai/Mistral-Small-24B-Instruct-2501")
+    // Extract the model name (e.g., "Qwen/Qwen2.5-7B-Instruct-1M" from "huggingface/Qwen/Qwen2.5-7B-Instruct-1M")
     const modelName = modelId.replace('huggingface/', '')
-    console.log('[v0] HuggingFace model name:', modelName)
-    // Use OpenAI SDK with HuggingFace's serverless inference endpoint
+    // Use OpenAI SDK with HuggingFace's router inference endpoint
+    // Format: https://router.huggingface.co/hf-inference/models/{model}/v1
     const huggingface = createOpenAI({
       apiKey,
-      baseURL: 'https://api-inference.huggingface.co/v1/',
+      baseURL: `https://router.huggingface.co/hf-inference/models/${modelName}/v1`,
     })
     return huggingface(modelName)
   }
