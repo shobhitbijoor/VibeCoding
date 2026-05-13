@@ -7,8 +7,6 @@ import {
 } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAzure } from '@ai-sdk/azure'
-import { createAnthropic } from '@ai-sdk/anthropic'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
 import { getGraphDatabase } from '@/lib/kuzu-graph'
 
@@ -415,7 +413,7 @@ const graphTools = {
 
 // Helper function to get the model based on provider and API key
 function getModel(modelId: string, userProvidedApiKey?: string) {
-  // Handle Azure CoE GPT-4o model
+  // Handle Azure CoE GPT-4o model - requires explicit API key
   if (modelId.startsWith('azure-coe/')) {
     const apiKey = userProvidedApiKey || process.env.AZURE_COE_API_KEY
     const endpoint = process.env.AZURE_COE_ENDPOINT
@@ -438,34 +436,43 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
     return azure('gpt-4o')
   }
 
+  // For OpenAI, Anthropic, and Google - use Vercel AI Gateway (zero config)
+  // or fallback to direct SDK if user provides an API key
   if (modelId.startsWith('openai/')) {
     const apiKey = userProvidedApiKey || process.env.OPENAI_API_KEY
-    if (!apiKey) {
-      throw new Error('OpenAI API key is required. Set OPENAI_API_KEY in environment variables or provide an API key in settings.')
+    if (apiKey) {
+      // Use direct OpenAI SDK if API key is provided
+      const openai = createOpenAI({ apiKey })
+      const modelName = modelId.replace('openai/', '')
+      return openai(modelName)
     }
-    const openai = createOpenAI({ apiKey })
-    const modelName = modelId.replace('openai/', '')
-    return openai(modelName)
+    // Use Vercel AI Gateway - just return the model ID string
+    // The AI SDK will use the gateway automatically
+    return modelId
   }
   
   if (modelId.startsWith('anthropic/')) {
     const apiKey = userProvidedApiKey || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('Anthropic API key is required. Set ANTHROPIC_API_KEY in environment variables or provide an API key in settings.')
+    if (apiKey) {
+      const { createAnthropic } = require('@ai-sdk/anthropic')
+      const anthropic = createAnthropic({ apiKey })
+      const modelName = modelId.replace('anthropic/', '')
+      return anthropic(modelName)
     }
-    const anthropic = createAnthropic({ apiKey })
-    const modelName = modelId.replace('anthropic/', '')
-    return anthropic(modelName)
+    // Use Vercel AI Gateway
+    return modelId
   }
   
   if (modelId.startsWith('google/')) {
     const apiKey = userProvidedApiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    if (!apiKey) {
-      throw new Error('Google AI API key is required. Set GOOGLE_GENERATIVE_AI_API_KEY in environment variables or provide an API key in settings.')
+    if (apiKey) {
+      const { createGoogleGenerativeAI } = require('@ai-sdk/google')
+      const google = createGoogleGenerativeAI({ apiKey })
+      const modelName = modelId.replace('google/', '')
+      return google(modelName)
     }
-    const google = createGoogleGenerativeAI({ apiKey })
-    const modelName = modelId.replace('google/', '')
-    return google(modelName)
+    // Use Vercel AI Gateway
+    return modelId
   }
   
   throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/, azure-coe/`)
