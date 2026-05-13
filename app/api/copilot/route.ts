@@ -7,6 +7,7 @@ import {
 } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAzure } from '@ai-sdk/azure'
+import { createHuggingFace } from '@ai-sdk/huggingface'
 import { z } from 'zod'
 import { getGraphDatabase } from '@/lib/kuzu-graph'
 
@@ -477,17 +478,19 @@ function getModel(modelId: string, userProvidedApiKey?: string) {
   
   if (modelId.startsWith('huggingface/')) {
     const apiKey = userProvidedApiKey || process.env.HUGGINGFACE_API_KEY
+    console.log('[v0] HuggingFace model requested:', modelId)
+    console.log('[v0] HuggingFace API key exists:', !!apiKey)
     if (!apiKey) {
       throw new Error('Hugging Face API key is required. Get your free API key from: https://huggingface.co/settings/tokens')
     }
-    // Extract the model name (e.g., "mistralai/Mistral-7B-Instruct-v0.3" from "huggingface/mistralai/Mistral-7B-Instruct-v0.3")
+    // Extract the model name (e.g., "mistralai/Mistral-Small-24B-Instruct-2501" from "huggingface/mistralai/Mistral-Small-24B-Instruct-2501")
     const modelName = modelId.replace('huggingface/', '')
-    // Use OpenAI-compatible endpoint for Hugging Face Inference API
-    const hfOpenAI = createOpenAI({
+    console.log('[v0] HuggingFace model name:', modelName)
+    // Use the official @ai-sdk/huggingface package
+    const huggingface = createHuggingFace({
       apiKey,
-      baseURL: 'https://api-inference.huggingface.co/v1',
     })
-    return hfOpenAI(modelName)
+    return huggingface(modelName)
   }
   
   throw new Error(`Unknown model provider for model: ${modelId}. Supported providers: openai/, anthropic/, google/, azure-coe/, huggingface/`)

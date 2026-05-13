@@ -17,6 +17,9 @@ importers:
       '@ai-sdk/google':
         specifier: ^3.0.71
         version: 3.0.71(zod@3.25.76)
+      '@ai-sdk/huggingface':
+        specifier: ^1.0.49
+        version: 1.0.49(zod@3.25.76)
       '@ai-sdk/openai':
         specifier: ^3.0.63
         version: 3.0.63(zod@3.25.76)
@@ -224,6 +227,18 @@ packages:
 
   '@ai-sdk/google@3.0.71':
     resolution: {integrity: sha512-G86UtqkCKM8mQcvsA4FQ1WCRN+w1gl/sxuoYl5CJX5DFSUSkrLNKmLcvi3TtnMvKth5li8W/1h3emQSl2K+qnA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/huggingface@1.0.49':
+    resolution: {integrity: sha512-FUHX3vKmpobYHTntTYBsjh8hBs/uvnLpqDf8S3EJu9gGkaoXreWz5fUmAnA3zlIfxuttacd0h+tLZm90fQ2cJA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4
+
+  '@ai-sdk/openai-compatible@2.0.47':
+    resolution: {integrity: sha512-Enm5UlL0zUCrW3792opk5h7hRWxZOZzDe6eQYVFqX9LUOGGCe1h8MZWAGim765nwzgnjlpeYOsuzZmLtRsTPlg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -3173,6 +3188,19 @@ snapshots:
       zod: 3.25.76
 
   '@ai-sdk/google@3.0.71(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider-utils': 4.0.27(zod@3.25.76)
+      zod: 3.25.76
+
+  '@ai-sdk/huggingface@1.0.49(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/openai-compatible': 2.0.47(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider-utils': 4.0.27(zod@3.25.76)
+      zod: 3.25.76
+
+  '@ai-sdk/openai-compatible@2.0.47(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.27(zod@3.25.76)
