@@ -777,6 +777,14 @@ export default function CopilotPage() {
                       >
                         Google AI API Keys <ExternalLink className="h-3 w-3" />
                       </a>
+                      <a
+                        href="https://huggingface.co/settings/tokens"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        Hugging Face API Keys (Free) <ExternalLink className="h-3 w-3" />
+                      </a>
                     </div>
                   </div>
                 </div>
